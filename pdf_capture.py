@@ -142,11 +142,19 @@ def fetch(case, quarantine):
             raise CaptureError("attachment_crawl_policy")
         fetcher._polite_wait(url)
         dest = quarantine / "attachment.pdf"
+        accept = "*/*" if roster_month else "application/pdf"
         with fetcher._client.stream("GET", url, follow_redirects=False,
-                                    headers={"Accept": "application/pdf", "Accept-Encoding": "identity"}) as response:
+                                    headers={"Accept": accept, "Accept-Encoding": "identity"}) as response:
             mime = response.headers.get("content-type", "").partition(";")[0].strip().casefold()
             allowed_mime = {"application/pdf", "application/octet-stream"} if roster_month else {"application/pdf"}
             if response.status_code != 200 or mime not in allowed_mime:
+                if roster_month:
+                    reported = {
+                        *allowed_mime, "application/download", "application/force-download", "application/x-download",
+                        "application/x-msdownload", "application/x-pdf", "text/html", "text/plain",
+                    }
+                    kind = mime if mime in reported else "other" if mime else "missing"
+                    raise CaptureError(f"roster_response_{response.status_code}_{kind}")
                 raise CaptureError("unexpected_attachment_response")
             size = 0
             with dest.open("xb") as output:
