@@ -55,7 +55,7 @@ jobs:
         run: |
           install -d -m 700 "$RUNNER_TEMP/mojito-pdf-text"
           stage=()
-          if [[ "$EDITION" == tc260_005 || "$EDITION" == shanghai_manufacturing_2026 ]]; then
+          if [[ "$EDITION" == tc260_005 || "$EDITION" == shanghai_manufacturing_2026 || "$EDITION" == cac_filing_2026_feb ]]; then
             stage=(--output /data/output)
           fi
           timeout --signal=TERM 180s docker run --rm --network=none --read-only --cap-drop=ALL \
@@ -67,7 +67,7 @@ jobs:
             --mount "type=bind,source=$RUNNER_TEMP/mojito-pdf-text,destination=/data" \
             --entrypoint python mojito-chinese-pdf -B /collector/pdf_capture.py extract "$EDITION" /quarantine "${stage[@]}"
       - name: Transfer the verified normalized text
-        if: ${{ inputs.publish_private && (inputs.edition == 'tc260_005' || inputs.edition == 'shanghai_manufacturing_2026') }}
+        if: ${{ inputs.publish_private && (inputs.edition == 'tc260_005' || inputs.edition == 'shanghai_manufacturing_2026' || inputs.edition == 'cac_filing_2026_feb') }}
         env:
           INTAKE_UPLOAD_TOKEN: ${{ secrets.INTAKE_UPLOAD_TOKEN }}
         run: |

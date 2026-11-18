@@ -19,8 +19,19 @@ from urllib.parse import urljoin, urlsplit
 CASES = {
     "cac_filing_2026_feb": {
         "parent": "https://www.cac.gov.cn/2024-04/02/c_1713729983803145.htm",
+        "pdf": ("https://www.cac.gov.cn/cms/pub/interact/downloadfile.jsp?filepath=NUtqEIwGiCjGm2Bhl20cvLGupl4aHWqlv5jFDErUO79vz0vHSSJ6sATU6DtmcGo1YoYJDltyJqpCTDRSAKq6GlAfqphfFn00jUfFRLdBE5I="
+                "&fText=%E7%94%9F%E6%88%90%E5%BC%8F%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD%E6%9C%8D%E5%8A%A1%E5%B7%B2%E5%A4%87%E6%A1%88%E5%92%8C%E5%B7%B2%E7%99%BB%E8%AE%B0%E4%BF%A1%E6%81%AF%EF%BC%882026%E5%B9%B42%E6%9C%88%EF%BC%89"),
         "title": "国家互联网信息办公室关于发布生成式人工智能服务已备案信息的公告",
         "roster_month": 2,
+        "record_title": "生成式人工智能服务已备案和已登记信息（2026年2月）",
+        "source": "cac_regs",
+        "source_genre": "institutional-commentary",
+        "date": "2026-03-17",
+        "document_number": None,
+        "publisher": "国家互联网信息办公室",
+        "pages": 4,
+        "pdf_sha256": "1c6dca73b3de14bf20a25f80513b7122e52330ccc76b6873c2a8b47f58062327",
+        "serial_ranges": ((749, 796), (436, 481)),
     },
     "tc260_005": {
         "parent": "https://www.cac.gov.cn/2026-05/22/c_1781191242686496.htm",
@@ -118,7 +129,7 @@ def fetch(case, quarantine):
             from route_probe import CAC_ROSTER_INDEX, MEDIA_TYPE, cac_roster_links
 
             url = cac_roster_links(page.text).get(roster_month)
-            if parent != CAC_ROSTER_INDEX or title != case["title"] or not url:
+            if parent != CAC_ROSTER_INDEX or title != case["title"] or url != case["pdf"]:
                 raise CaptureError("publisher_link_not_verified")
         else:
             attachments = {item["url"] for item in collect_attachment_links(tree, parent, [host])}
@@ -547,6 +558,7 @@ def write_capture(case, path, output, paragraphs, spans):
         "source", "canonical_url", "title_zh", "published", "content_hash", "docnum_hash",
         "republication_of", "body_complete", "fetched")}
     save_manifest(manifest, manifest_path)
+    return meta
 
 
 def roster_page(coordinates, expected_rows):
@@ -584,9 +596,7 @@ def roster_page(coordinates, expected_rows):
             positioned_text(after, separate_lines=True), advance_crossings)
 
 
-def measure_roster(reader):
-    if not 1 <= len(reader.pages) <= 160:
-        raise CaptureError("roster_page_cap")
+def read_roster(case, reader):
     headers = ("服务名称", "备案编号", "应用名称", "上线编号", "序号", "属地")
     text_bytes = 0
     counts = []
@@ -594,6 +604,7 @@ def measure_roster(reader):
     if len(reader.pages) != len(physical_rows):
         raise CaptureError("roster_page_count")
     serials = [[], []]
+    paragraphs, spans = [], []
     for index, page in enumerate(reader.pages):
         plain, layout = (page.extract_text(extraction_mode=mode) or "" for mode in ("plain", "layout"))
         text_bytes += len(plain.encode("utf-8")) + len(layout.encode("utf-8"))
@@ -609,6 +620,18 @@ def measure_roster(reader):
         row_order = compact(before + "".join(cell for row in rows for cell in row) + after)
         data_order = compact("".join(cell for row in data_rows for cell in row))
         table_header = [compact(cell) for cell in rows[0]] if index in {0, 2} else []
+        inventory = Counter(ordered)
+        if (not ordered or any(char in ordered + visual for char in ("\ufffd", "\x00"))
+                or inventory != Counter(visual) or inventory != coordinate_inventory
+                or inventory != Counter(row_order) or not all(cell for row in rows for cell in row)
+                or not data_order or ordered.count(data_order) != 1
+                or any(" | " in cell for row in rows for cell in row)
+                or any(not cell or cell not in ordered for cell in table_header)
+                or (table_header and table_header[:2] != ["序号", "属地"])):
+            raise CaptureError(f"roster_page_fidelity_{index + 1}")
+        page_paragraphs = [text for text in (before, *(" | ".join(row) for row in rows), after) if text]
+        paragraphs.extend(page_paragraphs)
+        spans.extend([(index + 1, index + 1)] * len(page_paragraphs))
         horizontal_lengths = Counter(round(abs(x2 - x1), 1) for kind, x1, _, x2, _ in lines if kind == "h")
         vertical_lengths = Counter(round(abs(y2 - y1), 1) for kind, _, y1, _, y2 in lines if kind == "v")
         origins = Counter(round(float(block["tx"]), 1) for block in positioned)
@@ -632,29 +655,37 @@ def measure_roster(reader):
                                 "vertical_lengths": vertical_lengths.most_common(12),
                                 "common_text_origins": origins.most_common(12)}})
     table_diagnostics = []
-    for values in serials:
+    for values, (first, last) in zip(serials, case["serial_ranges"], strict=True):
         numbers = [int(value) for value in values if re.fullmatch(r"[0-9]{1,5}", value)]
+        if len(numbers) != len(values) or numbers != list(range(first, last + 1)):
+            raise CaptureError("roster_serial_range")
         start = numbers[0] if numbers else 0
         table_diagnostics.append({"rows": len(values), "integer_serials": len(numbers),
                                   "first_serial": start, "last_serial": numbers[-1] if numbers else 0,
                                   "sequential": len(numbers) == len(values) and numbers == list(
                                       range(start, start + len(numbers)))})
-    return {"status": "roster_measured", "pages": len(counts), "page_diagnostics": counts,
-            "tables": table_diagnostics}
+    return ({"status": "roster_verified", "pages": len(counts), "page_diagnostics": counts,
+             "tables": table_diagnostics}, paragraphs, spans)
 
 
 def extract(case, quarantine, output=None):
     from pypdf import PdfReader
 
     path = quarantine / "attachment.pdf"
+    if "roster_month" in case and sha256(path.read_bytes()).hexdigest() != case["pdf_sha256"]:
+        raise CaptureError("roster_pdf_changed")
     with path.open("rb") as stream:
         reader = PdfReader(stream, strict=True)
         if reader.is_encrypted:
             raise CaptureError("encrypted_pdf")
         if "roster_month" in case:
+            measurement, paragraphs, spans = read_roster(case, reader)
+            staged = {}
             if output is not None:
-                raise CaptureError("roster_measurement_only")
-            return {**measure_roster(reader), "attachment_sha256": sha256(path.read_bytes()).hexdigest()}
+                meta = write_capture(case, path, output, paragraphs, spans)
+                staged = {"staged": 1, "paragraphs": len(paragraphs), "content_hash": meta["content_hash"],
+                          "paragraphs_by_page": dict(Counter(start for start, _ in spans))}
+            return {**measurement, "attachment_sha256": case["pdf_sha256"], **staged}
         if len(reader.pages) != case["pages"]:
             raise CaptureError("unexpected_page_count")
         text_by_mode = {}
