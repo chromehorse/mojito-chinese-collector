@@ -183,12 +183,16 @@ def compare_qiushi_article(fetcher):
     same_metadata = bool(known_edition and all(current[key] == saved[key] for key in ("title", "date", "author")))
     same_body = current["body_paragraphs"] == saved["body_paragraphs"]
     body = current["body_paragraphs"]
-    anchors = ("记者：", "王琛伟：", "刘冬梅：", "李晓华：")
-    complete = (bool(body) and body[-1].endswith("记者：感谢各位专家接受采访。")
-                and all(any(marker in paragraph for paragraph in body) for marker in anchors))
+    compact = [re.sub(r"\s+", "", paragraph).replace("：", ":") for paragraph in body]
+    anchors = ("记者:", "王琛伟:", "刘冬梅:", "李晓华:")
+    found_turns = sum(any(marker in paragraph for paragraph in compact) for marker in anchors)
+    ending = "记者:感谢各位专家接受采访。"
+    substantive = [paragraph for paragraph in compact if not paragraph.startswith(("网站编辑", "校对-", "审校-"))]
+    closing = bool(substantive and substantive[-1].endswith(ending))
+    complete = found_turns == len(anchors) and closing
     return {**result, "publisher_paragraphs": len(current["body_paragraphs"]),
             "archive_paragraphs": len(saved["body_paragraphs"]), "same_metadata": same_metadata,
-            "same_body": same_body, "complete_anchors": complete,
+            "same_body": same_body, "found_speakers": found_turns, "closing_verified": closing,
             "complete_match": same_metadata and same_body and complete}
 
 
