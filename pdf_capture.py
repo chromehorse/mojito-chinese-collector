@@ -5,9 +5,11 @@ from collections import Counter
 from contextlib import redirect_stderr, redirect_stdout
 from hashlib import sha256
 import json
+from math import isfinite
 import os
 from pathlib import Path
 import re
+from tempfile import TemporaryDirectory
 from traceback import extract_tb
 import unicodedata
 from urllib.parse import urljoin, urlsplit
@@ -52,6 +54,7 @@ CASES = {
         "title_meta": "ArticleTitle",
         "dashed_folios": True,
         "annex_page": 5,
+        "annex_title": "2026年上海市制造业智能化发展项目指南",
         "anchors": {
             1: "2026年1月10日",
             2: "支持“AI+制造”样板企业梯度培育",
@@ -143,7 +146,7 @@ def inspect_dashed_folios(text_by_mode):
     return cleaned, counts
 
 
-def inspect_annex_grid(page):
+def annex_coordinates(page):
     from pypdf._text_extraction._layout_mode import text_show_operations
 
     lines = set()
@@ -185,14 +188,12 @@ def inspect_annex_grid(page):
     # This uses the pinned layout extractor's in-memory blocks. Its optional
     # debug export cannot serialize this document's font resources.
     blocks = text_show_operations(iter(contents.operations), page._layout_mode_fonts(), True)
-    labels = ("专题", "方向名称", "支持内容", "联系人", "支持制造业企业",
-              "面向“AI+制造”重点领域", "支持工业互联网平台企业", "AI+制造：")
-    positions = [[(round(block["tx"], 1), round(block["ty"], 1)) for block in blocks
-                  if compact(block["text"]).startswith(label)] for label in labels]
-    return {"horizontal_edges": sorted(horizontal), "vertical_edges": sorted(vertical),
-            "line_segments": len(lines), "path_operators": dict(operators),
-            "block_count": len(blocks), "block_fields": sorted(blocks[0]) if blocks else [],
-            "anchors_xy": positions}
+    with TemporaryDirectory(prefix="annex-coordinates-") as directory:
+        scratch = Path(directory)
+        blocks = text_show_operations(iter(contents.operations), page._layout_mode_fonts(), True, scratch)
+        operations = json.loads((scratch / "tjs.json").read_text(encoding="utf-8"))
+    return (sorted(vertical), sorted(horizontal, reverse=True), lines, operations,
+            {"line_segments": len(lines), "path_operators": dict(operators), "block_count": len(blocks)})
 
 
 def score_pages(case, pages):
@@ -252,14 +253,135 @@ def page_blocks(page):
     return blocks
 
 
-def normalize(case, modes):
-    plain, layout = ([without_folio(text, label) for text, label in zip(modes[mode], case["page_labels"], strict=True)]
-                     for mode in ("plain", "layout"))
-    if list(map(compact, plain)) != list(map(compact, layout)):
-        raise CaptureError("text_order_disagrees")
+_SHANGHAI_CELLS = (
+    (0, 0, 1, 1), (0, 1, 1, 2), (0, 3, 1, 1), (0, 4, 1, 1),
+    (1, 0, 4, 1), (1, 1, 2, 1), (1, 2, 1, 1), (1, 3, 1, 1), (1, 4, 1, 1),
+    (2, 2, 1, 1), (2, 3, 1, 1), (2, 4, 1, 1),
+    (3, 1, 1, 2), (3, 3, 1, 1), (3, 4, 1, 1),
+    (4, 1, 1, 2), (4, 3, 1, 1), (4, 4, 1, 1),
+)
+_SHANGHAI_HEADERS = ("专题", "方向名称", "支持内容", "联系人")
+
+
+def verify_annex_grid(xs, ys, lines):
+    if len(xs) != 6 or len(ys) != 6 or len(lines) != 12:
+        raise CaptureError("annex_grid_size")
+    owners = {(r, c): (row, col)
+              for row, col, height, width in _SHANGHAI_CELLS
+              for r in range(row, row + height) for c in range(col, col + width)}
+
+    def covered(axis, fixed, start, end):
+        low, high = sorted((start, end))
+        intervals = []
+        for kind, x1, y1, x2, y2 in lines:
+            if kind != axis:
+                continue
+            first, last, level = (x1, x2, y1) if axis == "h" else (y1, y2, x1)
+            a, b = sorted((first, last))
+            if abs(level - fixed) <= 0.2 and min(b, high) - max(a, low) > 0.5:
+                intervals.append((a, b))
+        if not intervals:
+            return False
+        position = low
+        for a, b in sorted(intervals):
+            if a > position + 0.5:
+                raise CaptureError("annex_partial_grid_edge")
+            position = max(position, b)
+        if position < high - 0.5:
+            raise CaptureError("annex_partial_grid_edge")
+        return True
+
+    for row, y in enumerate(ys):
+        for col, (left, right) in enumerate(zip(xs, xs[1:])):
+            separates = owners.get((row - 1, col)) != owners.get((row, col))
+            if covered("h", y, left, right) != separates:
+                raise CaptureError("annex_horizontal_merge")
+    for col, x in enumerate(xs):
+        for row, (top, bottom) in enumerate(zip(ys, ys[1:])):
+            separates = owners.get((row, col - 1)) != owners.get((row, col))
+            if covered("v", x, bottom, top) != separates:
+                raise CaptureError("annex_vertical_merge")
+
+
+def positioned_text(fragments, *, separate_lines=False):
+    lines = []
+    for y, left, right, text in sorted(fragments, key=lambda item: (-item[0], item[1])):
+        if not lines or lines[-1][0] - y > 1.1:
+            lines.append((y, []))
+        lines[-1][1].append((left, right, text))
+    rendered = []
+    for _, pieces in lines:
+        text = ""
+        previous_right = None
+        for left, right, fragment in sorted(pieces):
+            if (text and left - previous_right > 1.5 and fragment and not text[-1].isspace()
+                    and not fragment[0].isspace() and not _HAN.match(text[-1]) and not _HAN.match(fragment[0])):
+                text += " "
+            text += fragment
+            previous_right = right
+        if text.strip():
+            rendered.append(text.strip())
+    if not rendered:
+        return ""
+    if separate_lines:
+        return " ".join(rendered)
+    text, *rest = rendered
+    for line in rest:
+        text = join_line(text, line)
+    return text
+
+
+def shanghai_annex(case, coordinates, plain, layout):
+    xs, ys, lines, operations, diagnostics = coordinates
+    verify_annex_grid(xs, ys, lines)
+    cells = {(row, col): [] for row, col, _, _ in _SHANGHAI_CELLS}
+    boxes = {(row, col): (xs[col], xs[col + width], ys[row + height], ys[row])
+             for row, col, height, width in _SHANGHAI_CELLS}
+    outside = []
+    for operation in operations:
+        text = operation["text"]
+        if not text.strip():
+            continue
+        x, y, end = (float(operation[k]) for k in ("tx", "ty", "displaced_tx"))
+        if operation["rotated"] or not all(map(isfinite, (x, y, end))) or end < x:
+            raise CaptureError("annex_invalid_text_position")
+        fragment = (y, x, end, text)
+        if y > ys[0] or y < ys[-1]:
+            outside.append(fragment)
+            continue
+        matches = [cell for cell, (left, right, low, high) in boxes.items()
+                   if low < y < high and left <= x < right and end <= right + 0.5]
+        if len(matches) != 1:
+            raise CaptureError("annex_cell_position")
+        cells[matches[0]].append(fragment)
+    texts = {cell: positioned_text(items, separate_lines=cell[1] == 4) for cell, items in cells.items()}
+    normalized = {cell: compact(text) for cell, text in texts.items()}
+    raw_caption = positioned_text(outside)
+    caption, folios = re.subn(r"[—–-]\s*5\s*[—–-]", "", raw_caption)
+    if folios != 1 or compact(caption) != case["annex_title"]:
+        raise CaptureError("annex_caption_or_folio")
+    if tuple(normalized[(0, col)] for col in (0, 1, 3, 4)) != _SHANGHAI_HEADERS:
+        raise CaptureError("annex_printed_headers")
+    if any(not text or text not in compact(plain) for text in normalized.values()):
+        raise CaptureError("annex_cell_text_disagrees")
+    inventory = Counter(compact(caption) + "".join(normalized.values()))
+    if inventory != Counter(compact(plain)) or inventory != Counter(compact(layout)):
+        raise CaptureError("annex_character_loss")
+    if (normalized[(1, 0)] != "制造业智能化发展"
+            or normalized[(1, 1)] != "支持“AI+制造”样板企业梯度培育"
+            or not normalized[(1, 3)].endswith("经评估后给予分档支持。")
+            or "2025年度1月1日-12月31日" not in normalized[(4, 3)]):
+        raise CaptureError("annex_scope_anchors")
+    paragraphs = [case["annex_title"], " | ".join(_SHANGHAI_HEADERS), texts[(1, 0)], texts[(1, 1)]]
+    paragraphs.extend(" | ".join(texts[(row, col)] for col in (direction, 3, 4))
+                      for row, direction in ((1, 2), (2, 2), (3, 1), (4, 1)))
+    return paragraphs, {**diagnostics, "bound_cells": len(cells), "rows": 4}
+
+
+def compose_paragraphs(case, layout, annex=None):
     paragraphs, spans = [], []
     for number, page in enumerate(layout, 1):
-        blocks = page_blocks(page)
+        blocks = annex if annex is not None and number == case["annex_page"] else page_blocks(page)
         if not blocks:
             raise CaptureError("empty_page")
         if phrase := case["cross_page"].get(number - 1):
@@ -270,11 +392,39 @@ def normalize(case, modes):
             spans[-1] = (spans[-1][0], number)
         paragraphs.extend(blocks)
         spans.extend([(number, number)] * len(blocks))
+    return paragraphs, spans
+
+
+def normalize(case, modes):
+    plain, layout = ([without_folio(text, label) for text, label in zip(modes[mode], case["page_labels"], strict=True)]
+                     for mode in ("plain", "layout"))
+    if list(map(compact, plain)) != list(map(compact, layout)):
+        raise CaptureError("text_order_disagrees")
+    paragraphs, spans = compose_paragraphs(case, layout)
     if (compact("".join(paragraphs)) != compact("".join(plain))
             or not compact(paragraphs[-1]).endswith(compact(case["ending"]))
             or compact(case["date"]) not in compact(layout[0])):
         raise CaptureError("normalized_text_not_verified")
     return paragraphs, spans
+
+
+def normalize_shanghai(case, cleaned, counts, coordinates):
+    plain, layout = cleaned["plain"], cleaned["layout"]
+    annex_index = case["annex_page"] - 1
+    if any(count != 1 for per_mode in counts.values() for count in per_mode):
+        raise CaptureError("folio_not_verified")
+    if any(compact(a) != compact(b) for index, (a, b) in enumerate(zip(plain, layout, strict=True))
+           if index != annex_index):
+        raise CaptureError("text_order_disagrees")
+    if (compact(case["document_number"]) not in compact(plain[0])
+            or not compact(plain[-1]).endswith("2026年1月12日印发")):
+        raise CaptureError("shanghai_edition_markers")
+    annex, diagnostics = shanghai_annex(case, coordinates, plain[annex_index], layout[annex_index])
+    paragraphs, spans = compose_paragraphs(case, layout, annex)
+    expected = [*plain[:annex_index], "".join(annex), *plain[annex_index + 1:]]
+    if compact("".join(paragraphs)) != compact("".join(expected)):
+        raise CaptureError("normalized_text_not_verified")
+    return paragraphs, spans, diagnostics
 
 
 def write_capture(case, path, output, paragraphs, spans):
@@ -318,7 +468,7 @@ def extract(case, quarantine, output=None):
             if sum(len(page.encode("utf-8")) for page in pages) > 3 * 1024 * 1024:
                 raise CaptureError("text_size_cap")
             text_by_mode[mode] = pages
-        table_grid = inspect_annex_grid(reader.pages[case["annex_page"] - 1]) if "annex_page" in case else None
+        coordinates = annex_coordinates(reader.pages[case["annex_page"] - 1]) if "annex_page" in case else None
     modes = {mode: score_pages(case, pages) for mode, pages in text_by_mode.items()}
     staged = {}
     if output is not None:
@@ -337,6 +487,7 @@ def extract(case, quarantine, output=None):
     if case.get("dashed_folios"):
         cleaned, counts = inspect_dashed_folios(text_by_mode)
         page_pairs = list(zip(cleaned["plain"], cleaned["layout"], strict=True))
+        paragraphs, spans, table_grid = normalize_shanghai(case, cleaned, counts, coordinates)
         layout_diagnostics = {
             "folio_removals": counts,
             "page_modes_agree_without_folios": [compact(a) == compact(b) for a, b in page_pairs],
@@ -344,6 +495,8 @@ def extract(case, quarantine, output=None):
             "cross_page_without_folios": {mode: score_pages(case, pages)["cross_page_hits"]
                                           for mode, pages in cleaned.items()},
             "table_grid": table_grid,
+            "verified_paragraphs": len(paragraphs),
+            "verified_cross_page_paragraphs": sum(first != last for first, last in spans),
         }
     return {"status": "measured", "pages": case["pages"], "page_modes_agree": page_modes_agree,
             "expected_anchors": len(case["anchors"]),
