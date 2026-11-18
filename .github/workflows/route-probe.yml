@@ -1,0 +1,37 @@
+name: Official publisher route probes
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  route:
+    name: ${{ matrix.source }}
+    if: >-
+      github.repository == 'chromehorse/mojito-chinese-collector' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        source: [people, state_council, cnki_zrbz, cnki_kxbz, moe, nda, ndrc]
+    steps:
+      - name: Retrieve trusted collector code
+        run: |
+          git init -q
+          git fetch -q --depth=1 "https://github.com/$GITHUB_REPOSITORY.git" "$GITHUB_SHA"
+          git checkout -q --detach FETCH_HEAD
+      - name: Prepare the unprivileged collector container
+        run: docker build -t mojito-chinese-collector .
+      - name: Measure approved publisher layouts
+        env:
+          PUBLISHER: ${{ matrix.source }}
+        run: |
+          timeout --signal=TERM 300s docker run --rm --read-only --cap-drop=ALL \
+            --security-opt=no-new-privileges --memory=1024m --pids-limit=64 \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,size=32m \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/route_probe.py,destination=/collector/route_probe.py,readonly" \
+            --entrypoint python mojito-chinese-collector -B /collector/route_probe.py "$PUBLISHER"
