@@ -38,6 +38,26 @@ CASES = {
         "anchors": {1: "第一条", 12: "本清单将根据工作需要动态调整"},
         "cross_page": {3: "主管部门监督。", 5: "系统的鲁棒性", 7: "人工智能科技活动清单"},
     },
+    "shanghai_manufacturing_2026": {
+        "parent": "https://www.sheitc.sh.gov.cn/cyfz/20260112/11e3168ff89a4eeea2b1afd193c19418.html",
+        "pdf": "https://www.sheitc.sh.gov.cn/cmsres/bd/bd2a507f86fd48eea75d71c94d247c84/3d967ffb9266571689033d2857f6a0ee.pdf",
+        "title": "上海市经济信息化委关于组织2026年上海市制造业智能化发展项目申报的通知",
+        "opening": "上海市经济和信息化委员会文件",
+        "date": "2026-01-12",
+        "document_number": "沪经信软〔2026〕20号",
+        "publisher": "上海市经济和信息化委员会",
+        "pages": 6,
+        "title_meta": "ArticleTitle",
+        "anchors": {
+            1: "2026年1月10日",
+            2: "支持“AI+制造”样板企业梯度培育",
+            3: "支持工业互联网平台智能化转型升级",
+            4: "上海市制造业智能化发展支持方向",
+            5: "经评估后给予分档支持",
+            6: "2026年1月12日印发",
+        },
+        "cross_page": {2: "数据采集、处理", 3: "信用记录良好"},
+    },
 }
 
 
@@ -65,7 +85,11 @@ def fetch(case, quarantine):
         if not page.ok or page.final_url != parent:
             raise CaptureError("parent_not_available")
         tree = clean_tree(page.text)
-        title = first_text(tree, "#con_title, h1") or ""
+        if metadata_title := case.get("title_meta"):
+            title_node = tree.css_first(f'meta[name="{metadata_title}"]')
+            title = title_node.attributes.get("content", "") if title_node else ""
+        else:
+            title = first_text(tree, "#con_title, h1") or ""
         attachments = {item["url"] for item in collect_attachment_links(tree, parent, [host])}
         attachments.update(miit_pdf_links(page.text, parent))
         if host == "www.cac.gov.cn":
@@ -240,7 +264,10 @@ def extract(case, quarantine, output=None):
         write_capture(case, path, output, paragraphs, spans)
         staged = {"staged": 1, "paragraphs": len(paragraphs),
                   "cross_page_paragraphs": sum(first != last for first, last in spans)}
-    return {"status": "measured", "pages": case["pages"], "expected_anchors": len(case["anchors"]),
+    page_modes_agree = [compact(plain) == compact(layout) for plain, layout in
+                        zip(text_by_mode["plain"], text_by_mode["layout"], strict=True)]
+    return {"status": "measured", "pages": case["pages"], "page_modes_agree": page_modes_agree,
+            "expected_anchors": len(case["anchors"]),
             "expected_cross_page": len(case["cross_page"]), "modes": modes, **staged}
 
 

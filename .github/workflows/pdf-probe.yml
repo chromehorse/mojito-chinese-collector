@@ -6,7 +6,7 @@ on:
       edition:
         description: Exact publisher attachment for the collector test
         type: choice
-        options: [tc260_005, miit_ethics_control]
+        options: [tc260_005, miit_ethics_control, shanghai_manufacturing_2026]
         default: tc260_005
       publish_private:
         description: Transfer the validated TC260 text to the private intake repository
