@@ -2,6 +2,11 @@ name: Chinese source coverage
 
 on:
   workflow_dispatch:
+    inputs:
+      recipes:
+        description: Comma-separated recipe IDs that failed the regular local scraper
+        type: string
+        required: true
 
 permissions: {}
 
@@ -22,6 +27,8 @@ jobs:
           git checkout -q --detach FETCH_HEAD
       - name: Group active sources by publisher
         id: sources
+        env:
+          FALLBACK_RECIPES: ${{ inputs.recipes }}
         run: |
           python3 -B - <<'PY'
           from collections import defaultdict
@@ -32,8 +39,13 @@ jobs:
 
           groups = defaultdict(list)
           rows = json.loads(Path('_sources.json').read_text(encoding='utf-8'))
+          selected = {name.strip() for name in os.environ['FALLBACK_RECIPES'].split(',')}
+          if not selected <= {row['id'] for row in rows}:
+              raise ValueError('Unknown fallback recipe')
           for row in rows:
               recipe = row['id']
+              if recipe not in selected:
+                  continue
               if not re.fullmatch(r'[a-z0-9_-]+', recipe):
                   raise ValueError('Invalid source recipe ID')
               if row['status'] == 'active':

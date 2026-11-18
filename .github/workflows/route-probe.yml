@@ -2,6 +2,11 @@ name: Official publisher route probes
 
 on:
   workflow_dispatch:
+    inputs:
+      sources:
+        description: JSON array of publisher groups that failed the local route
+        type: string
+        default: '["people","state_council","cnki_zrbz","cnki_kxbz"]'
 
 permissions: {}
 
@@ -17,7 +22,7 @@ jobs:
       fail-fast: false
       max-parallel: 4
       matrix:
-        source: [people, state_council, cnki_zrbz, cnki_kxbz, moe, nda, ndrc]
+        source: ${{ fromJSON(inputs.sources) }}
     steps:
       - name: Retrieve trusted collector code
         run: |

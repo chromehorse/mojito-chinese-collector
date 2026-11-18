@@ -12,6 +12,9 @@ on:
         description: Verify private repository read and write access without collecting
         type: boolean
         default: false
+      recipes:
+        description: Comma-separated recipe IDs that failed the regular local scraper
+        type: string
 
 permissions: {}
 
@@ -50,18 +53,26 @@ jobs:
         if: ${{ !inputs.verify_access }}
         run: docker build -t mojito-chinese-collector .
 
-      - name: Test three public publisher recipes
+      - name: Capture the selected fallback sources
         if: ${{ !inputs.verify_access }}
         id: probe
         continue-on-error: true
+        env:
+          FALLBACK_RECIPES: ${{ inputs.recipes }}
         run: |
+          if [[ ! "$FALLBACK_RECIPES" =~ ^[a-z0-9_-]+(,[a-z0-9_-]+)*$ ]]; then
+            printf '{"status":"missing_or_invalid_recipes"}\n'
+            exit 1
+          fi
+          IFS=, read -ra recipes <<< "$FALLBACK_RECIPES"
+          selected=()
+          for recipe in "${recipes[@]}"; do selected+=(--recipe "$recipe"); done
           install -d -m 700 "$RUNNER_TEMP/collector-state"
           docker run --rm --read-only --cap-drop=ALL --security-opt=no-new-privileges \
             --memory=1024m --pids-limit=64 --user "$(id -u):$(id -g)" \
             --tmpfs /tmp:rw,nosuid,nodev,noexec,size=32m \
             --mount "type=bind,source=$RUNNER_TEMP/collector-state,destination=/data" \
-            mojito-chinese-collector collect --data /data --summary-only --cap 4 \
-            --recipe mee_state_council --recipe shlab --recipe miit_kjs
+            mojito-chinese-collector collect --data /data --summary-only --cap 4 "${selected[@]}"
 
       - name: Send text to the private intake repo
         if: ${{ !cancelled() && (inputs.publish_private || inputs.verify_access) }}

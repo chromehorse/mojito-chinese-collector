@@ -1,4 +1,4 @@
-+"""Measure official HTML route candidates on the isolated collector."""
+"""Measure official HTML route candidates on the isolated collector."""
 
 from contextlib import redirect_stderr, redirect_stdout
 import json
