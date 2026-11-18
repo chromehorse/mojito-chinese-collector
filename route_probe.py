@@ -97,11 +97,21 @@ CASES = {
         ("gansu_full_official_copy", "https://zsj.pingliang.gov.cn/cyzc/art/2026/art_d5e1e5ab4183477bb85294c3153b18e4.html",
          "", "甘政发〔2026〕1号"),
     ),
+    "shenzhen_ai_policy": (
+        ("manufacturing_issuing_bureau", "https://gxj.sz.gov.cn/gkmlpt/content/12/12645/post_12645602.html",
+         "", "供需对接活动"),
+        ("manufacturing_city_archive", "https://www.sz.gov.cn/szzt2010/wgkzl/jcgk/jcygk/zdzcjc/content/post_12646745.html",
+         "", "供需对接活动"),
+        ("citywide_issuing_bureau", "https://gxj.sz.gov.cn/gkmlpt/content/12/12967/post_12967724.html",
+         "", "国家人工智能应用中试基地"),
+        ("citywide_city_archive", "https://www.sz.gov.cn/szzt2010/wgkzl/jcgk/jcygk/zdzcjc/content/post_12966980.html",
+         "", "国家人工智能应用中试基地"),
+    ),
 }
 BODY = ("div.TRS_Editor", ".trs_editor_view", "#UCAP-CONTENT", "#ozoom", "#articleContent",
         "#article-content", "#article", "#content", ".content", ".article-content", ".article_content",
         ".article", ".news-content", ".content-text", ".main-text", ".text_con", ".article_con",
-        ".abstract", ".abstract-text", ".word", ".pages_content", ".b12c", "#con_con")
+        ".abstract", ".abstract-text", ".word", ".pages_content", ".b12c", "#con_con", ".zwxl-article", "#mainText")
 TITLE = ("h1", "h2", ".title", ".article-title", ".article_title", ".news-title", "#ti", ".share-title")
 DATE = (".date", ".time", ".info", ".pubtime", ".source", ".article-info", ".article_info",
         ".article-date", ".article-source", ".pages-date", ".laiyuan", ".data-source",
