@@ -72,9 +72,11 @@ jobs:
           IFS=, read -ra recipes <<< "$FALLBACK_RECIPES"
           selected=()
           epaper=false
+          ethics_copy=false
           for recipe in "${recipes[@]}"; do
             case "$recipe" in
               pd_commentary|pd_zhongsheng) epaper=true ;;
+              moa_ai_ethics) ethics_copy=true ;;
               *) selected+=(--recipe "$recipe") ;;
             esac
           done
@@ -94,6 +96,11 @@ jobs:
             docker run "${container[@]}" \
               --mount "type=bind,source=$GITHUB_WORKSPACE/pd_epaper.py,destination=/collector/pd_epaper.py,readonly" \
               --entrypoint python mojito-chinese-collector -B /collector/pd_epaper.py "${dates[@]}" || result=$?
+          fi
+          if "$ethics_copy"; then
+            timeout --signal=TERM 180s docker run "${container[@]}" \
+              --mount "type=bind,source=$GITHUB_WORKSPACE/miit_ethics_copy.py,destination=/collector/miit_ethics_copy.py,readonly" \
+              --entrypoint python mojito-chinese-collector -B /collector/miit_ethics_copy.py /data || result=$?
           fi
           exit "$result"
 
