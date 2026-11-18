@@ -563,5 +563,31 @@
         "robots_missing_marker": "<h2>抱歉，您访问的地址有错或页面不存在。</h2>"
       }
     }
+  },
+  {
+    "id": "moa_ai_ethics",
+    "name": "农业农村部科学技术司 Ministry of Agriculture and Rural Affairs",
+    "kind": "listing",
+    "list_url": "https://kjs.moa.gov.cn/gzdt/202605/t20260514_6484163.htm",
+    "allowed_domains": [
+      "kjs.moa.gov.cn"
+    ],
+    "country": "CN",
+    "language": "zh",
+    "corpus": "government",
+    "authority_level": "regulator",
+    "source_genre_default": "decree",
+    "independence_cluster": "miit",
+    "cadence_days": 30,
+    "backfill_cap": 1,
+    "status": "blocked",
+    "status_evidence": "Local crawl-policy verification failed. Exact co-issuing ministry HTML is eligible for the isolated archive route.",
+    "recipe": {
+      "self_article": true,
+      "required_title_terms": [
+        "人工智能科技伦理审查与服务办法"
+      ],
+      "strict_html": {}
+    }
   }
 ]

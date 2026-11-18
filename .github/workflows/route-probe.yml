@@ -32,7 +32,7 @@ jobs:
       - name: Prepare the unprivileged collector container
         run: docker build -t mojito-chinese-collector .
       - name: Measure approved publisher layouts
-        if: matrix.source != 'qiushi_january'
+        if: matrix.source != 'qiushi_january' && matrix.source != 'miit_ethics_full'
         env:
           PUBLISHER: ${{ matrix.source }}
         run: |
@@ -51,6 +51,15 @@ jobs:
             --mount "type=bind,source=$GITHUB_WORKSPACE/chinese_backfill.py,destination=/collector/chinese_backfill.py,readonly" \
             --entrypoint python mojito-chinese-collector -B /collector/chinese_backfill.py \
             --summary-only --data /data --recipe qiushi --year 2026 --last-issue 1 --cap 6
+      - name: Verify all 37 articles and the appendix of the AI ethics policy
+        if: matrix.source == 'miit_ethics_full'
+        run: |
+          timeout --signal=TERM 180s docker run --rm --read-only --cap-drop=ALL \
+            --security-opt=no-new-privileges --memory=1024m --pids-limit=64 \
+            --tmpfs /data:rw,nosuid,nodev,noexec,size=32m,mode=1777 \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,size=32m \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/miit_ethics_copy.py,destination=/collector/miit_ethics_copy.py,readonly" \
+            --entrypoint python mojito-chinese-collector -B /collector/miit_ethics_copy.py /data
       - name: Check both e-paper columns through normal normalization
         if: matrix.source == 'people'
         run: |
