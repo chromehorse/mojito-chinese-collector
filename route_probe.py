@@ -72,6 +72,17 @@ CASES = {
         ("energy_bureau_copy", "https://xxgk.jcgov.gov.cn/szfgzbm/jcsnyj/fdzdgknr_31618/fgwj_31628/202605/t20260511_2348831.shtml",
          "", "国能发科技〔2026〕34号"),
     ),
+    "early_ai_policy": (
+        ("ndrc_original_accessible_edition", "https://www.ndrc.gov.cn/xxgk/zcfb/tz/202602/t20260210_1403680_ext.html",
+         "", "加强组织保障"),
+        ("ndrc_open_government_edition", "https://zfxxgk.ndrc.gov.cn/wap/iteminfo.jsp?id=20604", "", "加强组织保障"),
+        ("fujian_procurement_copy", "https://fgw.fujian.gov.cn/ztzl/cjzxjyzx/zcfg/202602/t20260212_7098061.htm",
+         "", "加强组织保障"),
+        ("cac_anthropomorphic_services", "https://www.cac.gov.cn/2026-04/10/c_1777558395078289.htm", "", "本办法自2026年7月15日起施行"),
+        ("gansu_ai_plan", "https://zwfw.gansu.gov.cn/guanghe/sbqd/gg/art/2026/art_69adfdba9218485b82cdd38c4336e0ff.html",
+         "", "甘政发〔2026〕1号"),
+        ("heilongjiang_ai_plan", "https://www.hlj.gov.cn/hlj/c108372/202602/c00_31915429.shtml", "", "此件公开发布"),
+    ),
 }
 BODY = ("div.TRS_Editor", ".trs_editor_view", "#UCAP-CONTENT", "#ozoom", "#articleContent",
         "#article-content", "#article", "#content", ".content", ".article-content", ".article_content",
