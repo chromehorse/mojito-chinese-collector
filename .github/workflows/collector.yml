@@ -22,6 +22,10 @@ on:
         description: Use two fixed public e-paper editions for an end-to-end test
         type: boolean
         default: false
+      verify_epaper_history:
+        description: Test two official January 2026 e-paper editions
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -67,6 +71,7 @@ jobs:
         env:
           FALLBACK_RECIPES: ${{ inputs.recipes }}
           VERIFY_EPAPER: ${{ inputs.verify_epaper }}
+          VERIFY_EPAPER_HISTORY: ${{ inputs.verify_epaper_history }}
           HISTORICAL_EDITION: ${{ inputs.edition }}
         run: |
           if [[ ! "$FALLBACK_RECIPES" =~ ^[a-z0-9_-]+(,[a-z0-9_-]+)*$ ]]; then
@@ -103,7 +108,12 @@ jobs:
           fi
           if "$epaper"; then
             dates=()
+            if [ "$VERIFY_EPAPER_HISTORY" = true ] && [ "$VERIFY_EPAPER" = true ]; then
+              printf '{"status":"conflicting_epaper_tests"}\n'
+              exit 1
+            fi
             if [ "$VERIFY_EPAPER" = true ]; then dates=(--verify-controls 2026-11-17 2026-09-16); fi
+            if [ "$VERIFY_EPAPER_HISTORY" = true ]; then dates=(--verify-controls 2026-01-05 2026-01-09); fi
             docker run "${container[@]}" \
               --mount "type=bind,source=$GITHUB_WORKSPACE/pd_epaper.py,destination=/collector/pd_epaper.py,readonly" \
               --entrypoint python mojito-chinese-collector -B /collector/pd_epaper.py "${dates[@]}" || result=$?
