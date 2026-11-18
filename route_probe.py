@@ -57,6 +57,14 @@ CASES = {
         ("moe_public_copy", "https://sjj.hunan.gov.cn/sjj/zwgk/zcfg/gjfg/202606/t20260608_33996235.html", "", "人工智能通识"),
         ("ndrc_public_copy", "https://www.jiangmen.gov.cn/bmpd/jmsfzhggj/ztlm/myjj/xwdt/content/post_3463758.html", "", "加强组织保障"),
     ),
+    "miit_ethics": (
+        ("hubei_copy", "https://jxt.hubei.gov.cn/bmdt/rdjj/202604/t20260407_5909143.shtml", "", "第三十七条"),
+        ("agriculture_copy", "https://kjs.moa.gov.cn/gzdt/202605/t20260514_6484163.htm", "", "第三十七条"),
+        ("commerce_index_record", "https://policy.mofcom.gov.cn/claw/clawContent.shtml?id=105505", "", "第三十七条"),
+        ("ganzhou_copy", "https://www.ganxian.gov.cn/gxqxxgk/c111150/202604/1e4b4efb916841c5b93f210d841a176a.shtml", "", "第三十七条"),
+        ("zhejiang_cac_copy", "https://www.zjwx.gov.cn/col/col1673566/art/2026/art_dc78f935ade4450c9f4e9aea8933fb33.html", "", "第三十七条"),
+        ("ordos_copy", "https://www.ordos.gov.cn/zwgk/zc/xzgfxwj/xxyxgfxwj/zfjqbm/sgyhxxhj/202605/t20260515_2041041.html", "", "第三十七条"),
+    ),
 }
 BODY = ("div.TRS_Editor", ".trs_editor_view", "#UCAP-CONTENT", "#ozoom", "#articleContent",
         "#article-content", "#article", "#content", ".content", ".article-content", ".article_content",
@@ -96,7 +104,7 @@ def main():
     cases = CASES[sys.argv[1]]
     domains = sorted({urlsplit(url).hostname for _, url, _, _ in cases})
     with open(os.devnull, "w") as sink, redirect_stdout(sink), redirect_stderr(sink):
-        fetcher = Fetcher(cache_dir=Path("/tmp/publisher-probe"),
+        fetcher = Fetcher(cache_dir=Path(os.environ.get("PUBLISHER_CACHE", "/tmp/publisher-probe")),
                           transport=httpx.HTTPTransport(trust_env=False),
                           strict_html_hosts={host: {} for host in domains})
         try:
