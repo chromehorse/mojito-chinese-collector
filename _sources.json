@@ -1,0 +1,567 @@
+[
+  {
+    "id": "qiushi",
+    "name": "求是 Qiushi",
+    "kind": "issue-archive",
+    "list_url": "https://www.qstheory.cn/qs/mulu.htm",
+    "allowed_domains": [
+      "qstheory.cn",
+      "www.qstheory.cn"
+    ],
+    "country": "CN",
+    "language": "zh",
+    "corpus": "government",
+    "authority_level": "central-doctrinal",
+    "source_genre_default": "institutional-commentary",
+    "independence_cluster": "cc-party-press",
+    "cadence_days": 14,
+    "backfill_cap": 60,
+    "status": "active",
+    "recipe": {
+      "year_link_selector": "div.booktitle a",
+      "year_url_pattern": "/\\d{8}/[0-9a-f]{32}/c\\.html?$",
+      "issue_link_selector": "div.highlight a, div.text a",
+      "issue_url_pattern": "/\\d{8}/[0-9a-f]{32}/c\\.html?$",
+      "issue_date_sort": true,
+      "max_issues": 2,
+      "list_selector": "div.highlight a",
+      "article_url_pattern": "/\\d{8}/[0-9a-f]{32}/c\\.html?$",
+      "article": {
+        "title": "h1",
+        "date": "span.pubtime",
+        "author": ".author",
+        "body": "div.text"
+      }
+    }
+  },
+  {
+    "id": "pd_commentary",
+    "name": "人民日报重要言论库 People's Daily Commentary Library",
+    "kind": "listing",
+    "list_url": "http://opinion.people.com.cn/GB/8213/49160/index.html",
+    "allowed_domains": [
+      "opinion.people.com.cn"
+    ],
+    "country": "CN",
+    "language": "zh",
+    "corpus": "government",
+    "authority_level": "central-doctrinal",
+    "source_genre_default": "institutional-commentary",
+    "independence_cluster": "cc-party-press",
+    "cadence_days": 2,
+    "backfill_cap": 40,
+    "status": "active",
+    "recipe": {
+      "section_link_selector": "div.item a",
+      "section_url_pattern": "/GB/8213/49160/\\d+/index\\.html$",
+      "list_selector": "li a, div.bor a",
+      "article_url_pattern": "/n1/\\d{4}/\\d{4}/c\\d+-\\d+\\.html$",
+      "article": {
+        "title": "h1",
+        "date": ".channel .col-1-1, .date",
+        "author": ".author",
+        "body": "div.rm_txt_con, div.show_text"
+      }
+    }
+  },
+  {
+    "id": "pd_zhongsheng",
+    "name": "人民日报 钟声 Zhong Sheng column",
+    "kind": "listing",
+    "list_url": "http://opinion.people.com.cn/GB/8213/49160/461972/index.html",
+    "allowed_domains": [
+      "opinion.people.com.cn"
+    ],
+    "country": "CN",
+    "language": "zh",
+    "corpus": "government",
+    "authority_level": "central-doctrinal",
+    "source_genre_default": "institutional-commentary",
+    "independence_cluster": "cc-party-press",
+    "cadence_days": 3,
+    "backfill_cap": 20,
+    "status": "active",
+    "recipe": {
+      "list_selector": "li.clearfix a",
+      "article_url_pattern": "/n1/\\d{4}/\\d{4}/c\\d+-\\d+\\.html$",
+      "article": {
+        "title": "h1",
+        "date": ".channel .col-1-1, .date",
+        "author": ".author",
+        "body": "div.rm_txt_con, div.show_text"
+      }
+    }
+  },
+  {
+    "id": "xinhua_comments",
+    "name": "新华网评论 Xinhua Comments",
+    "kind": "listing",
+    "list_url": "http://www.news.cn/comments/index.html",
+    "allowed_domains": [
+      "news.cn",
+      "www.news.cn"
+    ],
+    "country": "CN",
+    "language": "zh",
+    "corpus": "government",
+    "authority_level": "central-doctrinal",
+    "source_genre_default": "institutional-commentary",
+    "independence_cluster": "cc-party-press",
+    "cadence_days": 1,
+    "backfill_cap": 20,
+    "status": "active",
+    "recipe": {
+      "list_selector": "ul.xhwp_list a, div.tit a",
+      "article_url_pattern": "news\\.cn/(?:politics|comments)/\\d{8}/[0-9a-f]{32}/c\\.html?$",
+      "article": {
+        "title": "h1, span.title",
+        "date": "div.info, div.source",
+        "author": ".author",
+        "body": "#detail"
+      }
+    }
+  },
+  {
+    "id": "gov_policy_db",
+    "name": "国务院政策文件库 State Council Policy Document Library",
+    "kind": "policy-db",
+    "list_url": "https://sousuo.www.gov.cn/zcwjk/policyDocumentLibrary?q=%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD&t=zhengcelibrary",
+    "allowed_domains": [
+      "sousuo.www.gov.cn",
+      "www.gov.cn",
+      "gov.cn"
+    ],
+    "country": "CN",
+    "language": "zh",
+    "corpus": "government",
+    "authority_level": "regulator",
+    "source_genre_default": "decree",
+    "independence_cluster": "state-council",
+    "cadence_days": 7,
+    "backfill_cap": 30,
+    "status": "requires-js",
+    "status_evidence": "2026-07-17: RECOVERED via Rung C. Rung A found GET /search-gov/data but it returns totalCount=0 to direct calls (even empty query) — the search only executes inside the SPA's browser context. Rung-C container (rungc_capture.py, Playwright/Chromium, domain-allowlist route interception) renders the listing: 18 policy links incl. 人工智能; captured 10 records (国务院 AI+ action plan, New-Gen AI plan, sector +AI opinions). Capture path is rungc_capture.py, NOT run.py — kept out of the active set so normal backfill doesn't hit the JS wall.",
+    "recipe": {
+      "list_selector": "a",
+      "article": {
+        "title": "h1, .article-title, .share-title, #ti",
+        "date": ".pages-date, .date, .time",
+        "author": "",
+        "body": "#UCAP-CONTENT, .pages_content, .b12c, .TRS_Editor, .article"
+      },
+      "article_url_pattern": "gov\\.cn/.*(content_\\d+\\.htm|/content/)"
+    }
+  },
+  {
+    "id": "cac_regs",
+    "name": "国家网信办 政策法规 CAC Regulations",
+    "kind": "policy-db",
+    "list_url": "https://www.cac.gov.cn/wxzw/zcfg/xzfg/A09370302index_1.htm",
+    "allowed_domains": [
+      "cac.gov.cn",
+      "www.cac.gov.cn"
+    ],
+    "country": "CN",
+    "language": "zh",
+    "corpus": "government",
+    "authority_level": "regulator",
+    "source_genre_default": "decree",
+    "independence_cluster": "cac",
+    "cadence_days": 7,
+    "backfill_cap": 30,
+    "status": "active",
+    "recipe": {
+      "list_selector": "div.default a",
+      "article_url_pattern": "/\\d{4}-\\d{2}/\\d{2}/c_\\d+\\.htm$",
+      "article": {
+        "title": "h1",
+        "date": "span#pubtime, .info",
+        "author": "",
+        "body": "#BodyLabel, .main-content"
+      }
+    }
+  },
+  {
+    "id": "miit_kjs",
+    "name": "工信部科技司 文件发布 MIIT S&T Department Documents",
+    "kind": "policy-api",
+    "list_url": "https://www.miit.gov.cn/jgsj/kjs/wjfb/index.html",
+    "allowed_domains": [
+      "miit.gov.cn",
+      "www.miit.gov.cn"
+    ],
+    "country": "CN",
+    "language": "zh",
+    "corpus": "government",
+    "authority_level": "regulator",
+    "source_genre_default": "decree",
+    "independence_cluster": "miit",
+    "cadence_days": 7,
+    "backfill_cap": 30,
+    "status": "active",
+    "recipe": {
+      "api": {
+        "endpoint": "https://www.miit.gov.cn/api-gateway/jpaas-publish-server/front/page/build/unit?parseType=buildstatic&webId=8d828e408d90447786ddbe128d495e9e&tplSetId=209741b2109044b5b7695700b2bec37e&pageType=column&tagId=%E5%BD%93%E5%89%8D%E6%A0%8F%E7%9B%AE_list&editType=null&pageId=7df23bf39e2d42b793ebfcc3319015b7",
+        "q": "",
+        "max_pages": 1,
+        "list_html_path": "data.html"
+      },
+      "list_selector": "div.page-content a, ul a",
+      "article_url_pattern": "/jgsj/kjs/wjfb/art/\\d{4}/art_[0-9a-f]+\\.html$",
+      "article": {
+        "title": "#con_title, h1",
+        "date": ".pages-date, .date, span.time",
+        "author": "",
+        "body": "#con_con, .article-content, .TRS_Editor"
+      }
+    }
+  },
+  {
+    "id": "caict",
+    "name": "中国信通院 CAICT Blue Books & Reports",
+    "kind": "listing",
+    "list_url": "https://gma.caict.ac.cn/plat/news/full-collection-of-blue-books-and-report-published-by-caict-in-2025",
+    "allowed_domains": [
+      "gma.caict.ac.cn",
+      "caict.ac.cn",
+      "www.caict.ac.cn"
+    ],
+    "country": "CN",
+    "language": "zh",
+    "corpus": "thinktank",
+    "authority_level": "state-research",
+    "source_genre_default": "research-paper",
+    "independence_cluster": "caict",
+    "cadence_days": 14,
+    "backfill_cap": 15,
+    "status": "active",
+    "recipe": {
+      "discover_url": "https://gma.caict.ac.cn/plat/news",
+      "list_selector": "a",
+      "article_url_pattern": "/plat/news/[a-z0-9-]+$",
+      "article": {
+        "title": "h4.text-center, h1",
+        "date": "p.text-center, .date",
+        "author": "span.post-meta",
+        "body": "div.post-body"
+      }
+    }
+  },
+  {
+    "id": "thu_aiig",
+    "name": "清华大学人工智能国际治理研究院 研究报告 I-AIIG Reports",
+    "kind": "listing",
+    "list_url": "https://aiig.tsinghua.edu.cn/yjcg/yjbg/3.htm",
+    "allowed_domains": [
+      "aiig.tsinghua.edu.cn",
+      "www.aiig.tsinghua.edu.cn"
+    ],
+    "country": "CN",
+    "language": "zh",
+    "corpus": "academic",
+    "authority_level": "academic",
+    "source_genre_default": "research-paper",
+    "independence_cluster": "thu-aiig",
+    "cadence_days": 14,
+    "backfill_cap": 15,
+    "status": "active",
+    "recipe": {
+      "list_selector": "section.n_news a, li a",
+      "article_url_pattern": "info/\\d+/\\d+\\.htm$",
+      "article": {
+        "title": ".title h3, h3",
+        "date": "span.span4, .date",
+        "author": "span.span3",
+        "body": "div.fl01, .n_lunwen"
+      }
+    }
+  },
+  {
+    "id": "zrbzf_tongxun",
+    "name": "自然辩证法通讯 Journal of Dialectics of Nature",
+    "kind": "journal-toc",
+    "list_url": "https://jdn.ucas.ac.cn",
+    "allowed_domains": [
+      "jdn.ucas.ac.cn",
+      "www.jdn.ucas.ac.cn"
+    ],
+    "country": "CN",
+    "language": "zh",
+    "corpus": "academic",
+    "authority_level": "academic",
+    "source_genre_default": "research-paper",
+    "independence_cluster": "ucas-philsci",
+    "cadence_days": 30,
+    "backfill_cap": 15,
+    "status": "active",
+    "recipe": {
+      "list_selector": "div.in_bqks_lisk a",
+      "article_url_pattern": "/home/journal/view/id/\\d+$",
+      "abstract_only": true,
+      "article": {
+        "title": "div.btyksfd_wzkld",
+        "date": ".pub-date",
+        "author": "",
+        "body": "div.brwhjds_views"
+      }
+    }
+  },
+  {
+    "id": "most_ethics_2021",
+    "name": "科技部 新一代人工智能伦理规范 MOST AI Ethics Code 2021",
+    "kind": "seed-doc",
+    "list_url": "https://www.most.gov.cn/kjbgz/202109/t20210926_177063.html",
+    "allowed_domains": [
+      "most.gov.cn",
+      "www.most.gov.cn"
+    ],
+    "country": "CN",
+    "language": "zh",
+    "corpus": "government",
+    "authority_level": "regulator",
+    "source_genre_default": "decree",
+    "independence_cluster": "most",
+    "cadence_days": 30,
+    "backfill_cap": 1,
+    "status": "active",
+    "recipe": {
+      "list_selector": "",
+      "article": {
+        "title": "div.title_wide, h1",
+        "date": "div.notes",
+        "author": "",
+        "body": "div.TRS_Editor, div.text"
+      }
+    }
+  },
+  {
+    "id": "thepaper_sixiang",
+    "name": "澎湃新闻·思想市场 The Paper Sixiang",
+    "kind": "listing",
+    "list_url": "https://m.thepaper.cn/list_25483",
+    "allowed_domains": [
+      "thepaper.cn",
+      "m.thepaper.cn",
+      "www.thepaper.cn"
+    ],
+    "corpus": "commentary",
+    "authority_level": "commercial",
+    "source_genre_default": "signed-essay",
+    "independence_cluster": "thepaper",
+    "cadence_days": 2,
+    "backfill_cap": 15,
+    "recipe": {
+      "list_selector": "div.contentBox__E6I7I a, div.wrapper__XScdT a",
+      "article_url_pattern": "/newsDetail_forward_\\d+$",
+      "article": {
+        "title": "h1",
+        "date": "[class*=trueTime], [class*=time], .date",
+        "author": "[class*=author], .author",
+        "body": "div[class*=cententWrap], div[class*=contentWrap]"
+      }
+    },
+    "country": "CN",
+    "language": "zh",
+    "status": "active"
+  },
+  {
+    "id": "caixin_opinion",
+    "name": "财新观点频道 Caixin Opinion",
+    "kind": "listing",
+    "list_url": "https://opinion.caixin.com",
+    "allowed_domains": [
+      "caixin.com",
+      "opinion.caixin.com",
+      "www.caixin.com"
+    ],
+    "corpus": "commentary",
+    "authority_level": "commercial",
+    "source_genre_default": "signed-essay",
+    "independence_cluster": "caixin",
+    "cadence_days": 2,
+    "backfill_cap": 10,
+    "recipe": {
+      "list_selector": "div.boxa a",
+      "article_url_pattern": "/\\d{4}-\\d{2}-\\d{2}/\\d+\\.html$",
+      "article": {
+        "title": "h1",
+        "date": ".date",
+        "author": ".author",
+        "body": ".content"
+      }
+    },
+    "country": "CN",
+    "language": "zh",
+    "status": "active"
+  },
+  {
+    "id": "pku_caisg",
+    "name": "北京大学人工智能研究院 PKU Institute for AI (CAISG hub)",
+    "kind": "listing",
+    "list_url": "https://ai.pku.edu.cn/xwdt/index.htm",
+    "allowed_domains": [
+      "ai.pku.edu.cn",
+      "pku.edu.cn"
+    ],
+    "corpus": "academic",
+    "authority_level": "academic",
+    "source_genre_default": "research-paper",
+    "independence_cluster": "pku-ai",
+    "cadence_days": 14,
+    "backfill_cap": 10,
+    "recipe": {
+      "list_selector": "a",
+      "article_url_pattern": "/xwdt/.*\\d+\\.htm$",
+      "article": {
+        "title": "h1",
+        "date": ".date, .time, [class*=time]",
+        "author": "",
+        "body": "#main-content, .main-content-inner, .ccm-page"
+      }
+    },
+    "country": "CN",
+    "language": "zh",
+    "status": "active"
+  },
+  {
+    "id": "shlab",
+    "name": "上海人工智能实验室 Shanghai AI Laboratory",
+    "kind": "listing",
+    "list_url": "https://www.shlab.org.cn/info",
+    "allowed_domains": [
+      "www.shlab.org.cn"
+    ],
+    "corpus": "academic",
+    "authority_level": "state-research",
+    "source_genre_default": "institutional-commentary",
+    "independence_cluster": "shlab",
+    "cadence_days": 1,
+    "backfill_cap": 8,
+    "recipe": {
+      "list_selector": "div.itembox a",
+      "article_url_pattern": "^https://www[.]shlab[.]org[.]cn/news/\\d+$",
+      "article": {
+        "title": "div.m-detail > h1",
+        "date": "div.m-detail > h4",
+        "author": "",
+        "body": "div.m-detail > div.m-txt",
+        "complete_body": true
+      },
+      "required_title_terms": [
+        "人工智能",
+        "大模型",
+        "智能体",
+        "AI安全",
+        "AI治理",
+        "价值对齐",
+        "具身智能"
+      ],
+      "strict_html": {}
+    },
+    "country": "CN",
+    "language": "zh",
+    "status": "active",
+    "status_evidence": "Public first-party news index and full text verified with strict HTTPS-only capture. Uses no browser."
+  },
+  {
+    "id": "zrbzf_yanjiu",
+    "name": "自然辩证法研究 Studies in Dialectics of Nature (CNKI)",
+    "kind": "journal-toc",
+    "list_url": "https://zrbz.cbpt.cnki.net",
+    "allowed_domains": [
+      "cbpt.cnki.net",
+      "zrbz.cbpt.cnki.net"
+    ],
+    "corpus": "academic",
+    "authority_level": "academic",
+    "source_genre_default": "research-paper",
+    "independence_cluster": "cnki-zrbz",
+    "cadence_days": 30,
+    "backfill_cap": 10,
+    "recipe": {
+      "list_selector": "a",
+      "abstract_only": true,
+      "article": {
+        "title": "h1",
+        "date": ".date",
+        "author": ".author",
+        "body": ".abstract"
+      },
+      "rung_a_endpoint": "https://zrbz.cbpt.cnki.net/portal/journal/portal/client/paper_list/type_benqi"
+    },
+    "country": "CN",
+    "language": "zh",
+    "status": "requires-js",
+    "status_evidence": "2026-07-17: Rung-A reached content — shell meta-refreshes to WKB3/index.aspx then /portal/; portal exposes client endpoint /portal/journal/portal/client/paper_list/type_benqi (server-rendered, no JS to GET). Current issue = 10 div.paperBox blocks (title/author/abstract inline), but individual papers open via JS API getChineseHtmlUrl(paperId) with no static article <a href>. Abstract-only inline-block capture is a bounded v2 adapter; no paywall crossed."
+  },
+  {
+    "id": "kxjszx_yanjiu",
+    "name": "科学技术哲学研究 Studies in Philosophy of S&T (CNKI)",
+    "kind": "journal-toc",
+    "list_url": "https://kxbz.cbpt.cnki.net",
+    "allowed_domains": [
+      "cbpt.cnki.net",
+      "kxbz.cbpt.cnki.net"
+    ],
+    "corpus": "academic",
+    "authority_level": "academic",
+    "source_genre_default": "research-paper",
+    "independence_cluster": "cnki-kxbz",
+    "cadence_days": 30,
+    "backfill_cap": 10,
+    "recipe": {
+      "list_selector": "a",
+      "abstract_only": true,
+      "article": {
+        "title": "h1",
+        "date": ".date",
+        "author": ".author",
+        "body": ".abstract"
+      },
+      "rung_a_endpoint": "https://kxbz.cbpt.cnki.net/portal/journal/portal/client/paper_list/type_benqi"
+    },
+    "country": "CN",
+    "language": "zh",
+    "status": "requires-js",
+    "status_evidence": "2026-07-17: Rung-A reached content — shell meta-refreshes to WKB3/index.aspx then /portal/; portal exposes client endpoint /portal/journal/portal/client/paper_list/type_benqi (server-rendered, no JS to GET). Current issue = 10 div.paperBox blocks (title/author/abstract inline), but individual papers open via JS API getChineseHtmlUrl(paperId) with no static article <a href>. Abstract-only inline-block capture is a bounded v2 adapter; no paywall crossed."
+  },
+  {
+    "id": "mee_state_council",
+    "name": "State Council documents republished by the Ministry of Ecology and Environment",
+    "kind": "listing",
+    "list_url": "https://www.mee.gov.cn/zcwj/gwywj/",
+    "allowed_domains": [
+      "www.mee.gov.cn"
+    ],
+    "country": "CN",
+    "language": "zh",
+    "corpus": "government",
+    "authority_level": "regulator",
+    "source_genre_default": "decree",
+    "independence_cluster": "state-council",
+    "cadence_days": 1,
+    "backfill_cap": 15,
+    "status": "active",
+    "status_evidence": "Verified public HTML listing and full-text republications. The collection contains the ministry's selected State Council releases.",
+    "recipe": {
+      "list_selector": "a",
+      "article_url_pattern": "^https://www[.]mee[.]gov[.]cn/zcwj/gwywj/\\d{6}/t\\d+_\\d+[.]shtml$",
+      "article": {
+        "title": "h1.cjcs_phone_title",
+        "date": ".wjkFontBox",
+        "author": "",
+        "body": "div.TRS_Editor",
+        "complete_body": true
+      },
+      "required_title_terms": [
+        "人工智能",
+        "大模型",
+        "智能体"
+      ],
+      "strict_html": {
+        "robots_missing_path": "/404/index.shtml",
+        "robots_missing_marker": "<h2>抱歉，您访问的地址有错或页面不存在。</h2>"
+      }
+    }
+  }
+]

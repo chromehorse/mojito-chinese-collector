@@ -1,0 +1,7 @@
+**
+!requirements.txt
+!_sources.json
+!chinese_collector.py
+!run.py
+!scraper/
+!scraper/**/*.py

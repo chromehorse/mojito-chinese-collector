@@ -1,0 +1,70 @@
+name: Chinese collector
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      publish_private:
+        description: Send validated text to private intake
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check Python syntax
+        run: |
+          git init -q
+          git fetch -q --depth=1 "https://github.com/$GITHUB_REPOSITORY.git" "$GITHUB_SHA"
+          git checkout -q --detach FETCH_HEAD
+          python3 -m compileall -q chinese_collector.py chinese_collector_handoff.py run.py scraper
+
+  probe:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.repository == 'chromehorse/mojito-chinese-collector' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    concurrency:
+      group: collector-intake
+      cancel-in-progress: false
+    environment: private-intake
+    steps:
+      - name: Retrieve trusted collector code
+        run: |
+          git init -q
+          git fetch -q --depth=1 "https://github.com/$GITHUB_REPOSITORY.git" "$GITHUB_SHA"
+          git checkout -q --detach FETCH_HEAD
+
+      - name: Prepare the unprivileged collector container
+        run: docker build -t mojito-chinese-collector .
+
+      - name: Test three public publisher recipes
+        id: probe
+        continue-on-error: true
+        run: |
+          install -d -m 700 "$RUNNER_TEMP/collector-state"
+          docker run --rm --read-only --cap-drop=ALL --security-opt=no-new-privileges \
+            --memory=1024m --pids-limit=64 --user "$(id -u):$(id -g)" \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,size=32m \
+            --mount "type=bind,source=$RUNNER_TEMP/collector-state,destination=/data" \
+            mojito-chinese-collector collect --data /data --summary-only --cap 4 \
+            --recipe mee_state_council --recipe shlab --recipe miit_kjs
+
+      - name: Send text to the private intake repo
+        if: ${{ !cancelled() && inputs.publish_private }}
+        env:
+          INTAKE_UPLOAD_TOKEN: ${{ secrets.INTAKE_UPLOAD_TOKEN }}
+        run: |
+          python3 -B chinese_collector_handoff.py push \
+            --repository chromehorse/mojito-chinese-intake --directory "$RUNNER_TEMP/collector-state"
+
+      - name: Report publisher probe failures
+        if: ${{ !cancelled() && steps.probe.outcome == 'failure' }}
+        run: exit 1
