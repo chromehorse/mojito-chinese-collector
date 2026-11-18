@@ -338,6 +338,7 @@ def shanghai_annex(case, coordinates, plain, layout):
     boxes = {(row, col): (xs[col], xs[col + width], ys[row + height], ys[row])
              for row, col, height, width in _SHANGHAI_CELLS}
     outside = []
+    advance_crossings = 0
     for operation in operations:
         text = operation["text"]
         if not text.strip():
@@ -351,11 +352,12 @@ def shanghai_annex(case, coordinates, plain, layout):
             continue
         origins = [cell for cell, (left, right, low, high) in boxes.items()
                    if low < y < high and left <= x < right]
-        matches = [cell for cell in origins if end <= boxes[cell][1] + 0.5]
-        if len(matches) != 1:
-            coordinates = (round(x, 2), round(y, 2), round(end, 2), round(float(operation["font_height"]), 2))
-            raise CaptureError(f"annex_cell_position {coordinates} origins={origins}")
-        cells[matches[0]].append(fragment)
+        if len(origins) != 1:
+            position = (round(x, 2), round(y, 2), round(end, 2))
+            raise CaptureError(f"annex_cell_position {position} origins={origins}")
+        cell, = origins
+        advance_crossings += end > boxes[cell][1] + 0.5
+        cells[cell].append(fragment)
     texts = {cell: positioned_text(items, separate_lines=cell[1] == 4) for cell, items in cells.items()}
     normalized = {cell: compact(text) for cell, text in texts.items()}
     raw_caption = positioned_text(outside)
@@ -364,8 +366,13 @@ def shanghai_annex(case, coordinates, plain, layout):
         raise CaptureError("annex_caption_or_folio")
     if tuple(normalized[(0, col)] for col in (0, 1, 3, 4)) != _SHANGHAI_HEADERS:
         raise CaptureError("annex_printed_headers")
-    if any(not text or text not in compact(plain) for text in normalized.values()):
+    if any(not text for text in normalized.values()):
         raise CaptureError("annex_cell_text_disagrees")
+    # A PDF glyph's advance can extend past the drawn cell edge. Assign its
+    # origin to the physical cell, then verify the full cell order against the
+    # independent content-stream reading.
+    if compact(caption) + "".join(normalized.values()) != compact(plain):
+        raise CaptureError(f"annex_cell_order_disagrees {advance_crossings} calculated advance crossings")
     inventory = Counter(compact(caption) + "".join(normalized.values()))
     if inventory != Counter(compact(plain)) or inventory != Counter(compact(layout)):
         raise CaptureError("annex_character_loss")
@@ -377,7 +384,8 @@ def shanghai_annex(case, coordinates, plain, layout):
     paragraphs = [case["annex_title"], " | ".join(_SHANGHAI_HEADERS), texts[(1, 0)], texts[(1, 1)]]
     paragraphs.extend(" | ".join(texts[(row, col)] for col in (direction, 3, 4))
                       for row, direction in ((1, 2), (2, 2), (3, 1), (4, 1)))
-    return paragraphs, {**diagnostics, "bound_cells": len(cells), "rows": 4}
+    return paragraphs, {**diagnostics, "bound_cells": len(cells), "rows": 4,
+                        "advance_crossings": advance_crossings}
 
 
 def compose_paragraphs(case, layout, annex=None):
