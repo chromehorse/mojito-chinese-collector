@@ -77,6 +77,18 @@ CASES = {
                 "&fText=%E7%94%9F%E6%88%90%E5%BC%8F%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD%E6%9C%8D%E5%8A%A1%E5%B7%B2%E5%A4%87%E6%A1%88%E5%92%8C%E5%B7%B2%E7%99%BB%E8%AE%B0%E4%BF%A1%E6%81%AF%EF%BC%882026%E5%B9%B48%E6%9C%88%EF%BC%89"),
         "title": "国家互联网信息办公室关于发布生成式人工智能服务已备案信息的公告",
         "roster_month": 8,
+        "record_title": "生成式人工智能服务已备案和已登记信息（2026年8月）",
+        "source": "cac_regs",
+        "source_genre": "institutional-commentary",
+        "date": "2026-09-14",
+        "document_number": None,
+        "publisher": "国家互联网信息办公室",
+        "pages": 12,
+        "rows_by_page": (23, 24, 25, 26, 19, 7, 19, 24, 23, 22, 23, 22),
+        "header_pages": (1, 6, 7),
+        "columns_by_page": (6, 6, 6, 6, 6, 7, 6, 6, 6, 6, 6, 6),
+        "pdf_sha256": "081f8abad11d3e89cc94e9c4e8f76133613a4f4e05b14d6a88e086be050629e5",
+        "serial_ranges": ((989, 1105), (1, 7), (599, 731)),
     },
     "tc260_005": {
         "parent": "https://www.cac.gov.cn/2026-05/22/c_1781191242686496.htm",
@@ -642,44 +654,6 @@ def roster_page(coordinates, expected_rows, expected_columns):
             positioned_text(after, separate_lines=True), advance_crossings)
 
 
-def measure_roster_geometry(reader):
-    if not 1 <= len(reader.pages) <= 24:
-        raise CaptureError("roster_geometry_page_cap")
-    pages, size = [], 0
-    for page in reader.pages:
-        plain, layout = (page.extract_text(extraction_mode=mode) or "" for mode in ("plain", "layout"))
-        size += len(plain.encode("utf-8")) + len(layout.encode("utf-8"))
-        if size > 3 * 1024 * 1024:
-            raise CaptureError("text_size_cap")
-        ordered, visual = compact(plain), compact(layout)
-        coordinates = annex_coordinates(page)
-        xs, ys, lines, operations, _ = coordinates
-        row = {"grid_columns": len(xs) - 1, "grid_rows": len(ys) - 1, "lines": len(lines),
-               "characters": len(ordered), "modes_match": Counter(ordered) == Counter(visual),
-               "coordinate_inventory_matches": Counter(ordered) == Counter(compact(
-                   "".join(block["text"] for block in operations)))}
-        pages.append(row)
-        try:
-            before, grid, after, _ = roster_page(coordinates, len(ys) - 1, len(xs) - 1)
-        except CaptureError as error:
-            row["layout_failure"] = str(error)
-            continue
-        header = len(grid) > 0 and [compact(cell) for cell in grid[0][:2]] == ["序号", "属地"]
-        rows = grid[1:] if header else grid
-        numbers = [int(value) for cells in rows if re.fullmatch(r"[0-9]{1,5}", value := compact(cells[0]))]
-        complete = compact("".join(cell for cells in rows for cell in cells))
-        row.update(header=header, data_rows=len(rows), all_cells_present=all(cell for cells in grid for cell in cells),
-                   first_serial=numbers[0] if numbers else None, last_serial=numbers[-1] if numbers else None,
-                   serials_match=len(numbers) == len(rows) and bool(numbers) and numbers == list(
-                       range(numbers[0], numbers[0] + len(numbers))),
-                   data_order_in_stream=bool(complete) and ordered.count(complete) == 1,
-                   rows_in_stream=sum(bool(text and text in ordered)
-                                      for cells in rows if (text := compact("".join(cells)))),
-                   paragraphs=len(grid) + bool(before) + bool(after),
-                   before_characters=len(compact(before)), after_characters=len(compact(after)))
-    return {"status": "roster_geometry", "pages": pages}
-
-
 def read_roster(case, reader):
     headers = ("服务名称", "备案编号", "应用名称", "上线编号", "序号", "属地")
     text_bytes = 0
@@ -761,19 +735,13 @@ def extract(case, quarantine, output=None):
     from pypdf import PdfReader
 
     path = quarantine / "attachment.pdf"
-    if "roster_month" in case:
-        roster_hash = sha256(path.read_bytes()).hexdigest()
-        if case.get("pdf_sha256") and roster_hash != case["pdf_sha256"]:
-            raise CaptureError("roster_pdf_changed")
+    if "roster_month" in case and sha256(path.read_bytes()).hexdigest() != case["pdf_sha256"]:
+        raise CaptureError("roster_pdf_changed")
     with path.open("rb") as stream:
         reader = PdfReader(stream, strict=True)
         if reader.is_encrypted:
             raise CaptureError("encrypted_pdf")
         if "roster_month" in case:
-            if "pdf_sha256" not in case:
-                if output is not None:
-                    raise CaptureError("unverified_roster_geometry")
-                return {**measure_roster_geometry(reader), "attachment_sha256": roster_hash}
             measurement, paragraphs, spans = read_roster(case, reader)
             staged = {}
             if output is not None:
