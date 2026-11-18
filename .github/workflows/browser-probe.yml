@@ -65,6 +65,10 @@ jobs:
         env:
           INTAKE_UPLOAD_TOKEN: ${{ secrets.INTAKE_UPLOAD_TOKEN }}
         run: |
+          if [ ! -f /var/tmp/mojito-browser/files/output/manifest.json ]; then
+            printf '{"status":"no_validated_batch","documents":0}\n'
+            exit 0
+          fi
           python3 -B chinese_collector_handoff.py push \
             --repository chromehorse/mojito-chinese-intake --directory /var/tmp/mojito-browser/files
       - name: Report browser failures

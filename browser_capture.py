@@ -52,7 +52,7 @@ def capture(entry, output):
     listing = GOV_LATEST if entry["id"] == "gov_policy_db" else recipe.get("rung_a_endpoint", entry["list_url"])
     summary = {"status": "ok", "recipe": entry["id"], "discovered": 0, "inline_papers": 0,
                "parsed": 0, "written": 0, "abstracts": 0, "blocked_requests": 0,
-               "blocked_http": 0, "parse_failures": 0}
+               "blocked_http": 0, "parse_failures": 0, "parse_failure_reasons": {}}
     policy = Fetcher(cache_dir=output.parent / "cache",
                      transport=httpx.HTTPTransport(trust_env=False),
                      strict_html_hosts={host: {} for host in domains})
@@ -126,7 +126,8 @@ def capture(entry, output):
             summary["inline_papers"] = len(clean_tree(listing_html).css("div.paperBox"))
             pattern = recipe.get("article_url_pattern") or ARTICLE_PATH
             candidates = [url for url in extract_links(listing_html, listing, "a", domains, pattern)
-                          if exact_origin(url, domains)]
+                          if exact_origin(url, domains)
+                          and (entry["id"] != "gov_policy_db" or urlsplit(url).path.startswith("/zhengce/"))]
             cap = min(entry["backfill_cap"], 30)
             urls = candidates[:cap]
             summary["listing_candidates"] = len(candidates)
@@ -143,8 +144,13 @@ def capture(entry, output):
                     parsed = parse_article(html, entry, url)
                     if not parsed["date"]:
                         raise AdapterError("Missing publication date")
-                except (AdapterError, Error):
+                except (AdapterError, Error) as error:
                     summary["parse_failures"] += 1
+                    reason = ("resource_limit" if requests >= MAX_BROWSER_REQUESTS or received >= MAX_BROWSER_BYTES else
+                              "browser_navigation" if isinstance(error, Error) else
+                              "missing_publication_date" if "publication date" in str(error) else
+                              "unexpected_navigation" if "navigation" in str(error) else "article_structure")
+                    summary["parse_failure_reasons"][reason] = summary["parse_failure_reasons"].get(reason, 0) + 1
                     continue
                 summary["parsed"] += 1
                 relevant = (ai_policy_relevant(parsed["title"], parsed["body_paragraphs"])
@@ -172,6 +178,8 @@ def capture(entry, output):
                 summary["status"] = "abstract_listing_only" if summary["inline_papers"] else "no_validated_article"
             elif summary["parse_failures"] or summary["blocked_http"]:
                 summary["status"] = "partial_capture"
+            summary["resource_requests"] = requests
+            summary["resource_bytes"] = received
             context.close()
             browser.close()
     finally:
