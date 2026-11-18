@@ -15,6 +15,8 @@ from scraper.fetcher import Fetcher
 
 QIUSHI_FIRST_ISSUE = "https://www.qstheory.cn/20251231/2b7c1a0955524272be96ac77ccff34eb/c.html"
 QIUSHI_SNAPSHOT = "https://web.archive.org/web/20260521082819id_/" + QIUSHI_FIRST_ISSUE
+QIUSHI_INTERVIEW = "https://www.qstheory.cn/20251231/18ec77b7dded4aa799e537c6068f8050/c.html"
+QIUSHI_INTERVIEW_SNAPSHOT = "https://web.archive.org/web/20260417202126id_/" + QIUSHI_INTERVIEW
 CASES = {
     "people": (
         ("commentary_index", "https://opinion.people.com.cn/GB/8213/49160/index.html", r"/n1/\d{4}/", ""),
@@ -156,23 +158,63 @@ def compare_qiushi_archive(fetcher):
     return result
 
 
+def compare_qiushi_article(fetcher):
+    from scraper.adapters import issue_archive
+    from scraper.adapters._common import AdapterError
+    from scraper.registry import load_registry
+
+    original = fetcher.fetch(QIUSHI_INTERVIEW, [urlsplit(QIUSHI_INTERVIEW).hostname])
+    archive = fetcher.fetch(QIUSHI_INTERVIEW_SNAPSHOT, [urlsplit(QIUSHI_INTERVIEW_SNAPSHOT).hostname])
+    result = {"case": "qiushi_archived_interview", "publisher_status": original.status,
+              "archive_status": archive.status, "robots_blocked": fetcher.stats["robots_blocked"],
+              "complete_match": False}
+    if not (original.ok and archive.ok and archive.final_url == QIUSHI_INTERVIEW_SNAPSHOT):
+        return result
+    entry = next(entry for entry in load_registry() if entry["id"] == "qiushi")
+    try:
+        current, saved = (issue_archive.parse(response.text, entry, QIUSHI_INTERVIEW)
+                          for response in (original, archive))
+    except AdapterError:
+        result["parse_failed"] = True
+        return result
+    authors = {"旷思思", "尹立蒙"}
+    known_edition = (current["date"] == "2026-01-01" and "如何以“场景”助力高质量发展" in current["title"]
+                     and all(name in (current["author"] or "") for name in authors))
+    same_metadata = bool(known_edition and all(current[key] == saved[key] for key in ("title", "date", "author")))
+    same_body = current["body_paragraphs"] == saved["body_paragraphs"]
+    body = current["body_paragraphs"]
+    anchors = ("记者：", "王琛伟：", "刘冬梅：", "李晓华：")
+    complete = (bool(body) and body[-1].endswith("记者：感谢各位专家接受采访。")
+                and all(any(marker in paragraph for paragraph in body) for marker in anchors))
+    return {**result, "publisher_paragraphs": len(current["body_paragraphs"]),
+            "archive_paragraphs": len(saved["body_paragraphs"]), "same_metadata": same_metadata,
+            "same_body": same_body, "complete_anchors": complete,
+            "complete_match": same_metadata and same_body and complete}
+
+
 def main():
-    archive = sys.argv[1] == "wayback_qiushi"
-    cases = CASES[sys.argv[1]] if not archive else ()
-    domains = (sorted({urlsplit(url).hostname for _, url, _, _ in cases}) if not archive
-               else [urlsplit(url).hostname for url in (QIUSHI_FIRST_ISSUE, QIUSHI_SNAPSHOT)])
+    case = sys.argv[1]
+    archived_routes = {
+        "wayback_qiushi": (QIUSHI_FIRST_ISSUE, QIUSHI_SNAPSHOT, compare_qiushi_archive),
+        "wayback_qiushi_article": (QIUSHI_INTERVIEW, QIUSHI_INTERVIEW_SNAPSHOT, compare_qiushi_article),
+    }
+    archive = archived_routes.get(case)
+    cases = CASES[case] if archive is None else ()
+    urls = (url for _, url, _, _ in cases) if archive is None else archive[:2]
+    domains = sorted({urlsplit(url).hostname for url in urls})
     with open(os.devnull, "w") as sink, redirect_stdout(sink), redirect_stderr(sink):
         fetcher = Fetcher(cache_dir=Path(os.environ.get("PUBLISHER_CACHE", "/tmp/publisher-probe")),
                           transport=httpx.HTTPTransport(trust_env=False),
                           strict_html_hosts={host: {} for host in domains})
         try:
             results = ([inspect(fetcher, *case, domains) for case in cases] if not archive
-                       else [compare_qiushi_archive(fetcher)])
+                       else [archive[2](fetcher)])
         finally:
             fetcher.close()
     for row in results:
         print(json.dumps(row), flush=True)
+    return int(case == "wayback_qiushi_article" and not results[0]["complete_match"])
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
