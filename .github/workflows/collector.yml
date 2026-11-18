@@ -128,7 +128,9 @@ jobs:
           exit "$result"
 
       - name: Send text to the private intake repo
-        if: ${{ !cancelled() && (inputs.publish_private || inputs.verify_access) }}
+        if: >-
+          ${{ !cancelled() && (inputs.publish_private || inputs.verify_access) &&
+          (!inputs.verify_epaper_history || steps.probe.outcome == 'success') }}
         env:
           INTAKE_UPLOAD_TOKEN: ${{ secrets.INTAKE_UPLOAD_TOKEN }}
           VERIFY_ACCESS: ${{ inputs.verify_access }}

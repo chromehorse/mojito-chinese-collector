@@ -28,7 +28,7 @@ CONTROLS = {
 }
 CONTROL_TEXT = {
     "content_30129344.html": (("第二十条规定",), "既有力度又有温度。"),
-    "content_30130819.html": (("彭飞：", "曾毅："), "将人类社会引向万劫不复的危险境地。"),
+    "content_30130819.html": (("彭飞：", "曾毅："), "以免把人类社会引向万劫不复的危险境地。"),
 }
 CONTROL_FAILURES = {"control_markers", "control_ending_last_block", "control_ending_before_tail", "control_ending_missing"}
 ENTRY = {
