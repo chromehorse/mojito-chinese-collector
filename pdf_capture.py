@@ -30,6 +30,8 @@ CASES = {
         "document_number": None,
         "publisher": "国家互联网信息办公室",
         "pages": 4,
+        "rows_by_page": (23, 25, 23, 23),
+        "header_pages": (1, 3),
         "pdf_sha256": "1c6dca73b3de14bf20a25f80513b7122e52330ccc76b6873c2a8b47f58062327",
         "serial_ranges": ((749, 796), (436, 481)),
     },
@@ -39,6 +41,17 @@ CASES = {
                 "&fText=%E7%94%9F%E6%88%90%E5%BC%8F%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD%E6%9C%8D%E5%8A%A1%E5%B7%B2%E5%A4%87%E6%A1%88%E5%92%8C%E5%B7%B2%E7%99%BB%E8%AE%B0%E4%BF%A1%E6%81%AF%EF%BC%882026%E5%B9%B44%E6%9C%88%EF%BC%89"),
         "title": "国家互联网信息办公室关于发布生成式人工智能服务已备案信息的公告",
         "roster_month": 4,
+        "record_title": "生成式人工智能服务已备案和已登记信息（2026年4月）",
+        "source": "cac_regs",
+        "source_genre": "institutional-commentary",
+        "date": "2026-05-13",
+        "document_number": None,
+        "publisher": "国家互联网信息办公室",
+        "pages": 5,
+        "rows_by_page": (23, 27, 22, 23, 26),
+        "header_pages": (1, 4),
+        "pdf_sha256": "71506cb507995eb1fa7cef325b4e87d0a75cf32e77d86ce6a52fe05caffdc3b4",
+        "serial_ranges": ((797, 868), (482, 530)),
     },
     "cac_filing_2026_jun": {
         "parent": "https://www.cac.gov.cn/2024-04/02/c_1713729983803145.htm",
@@ -46,6 +59,17 @@ CASES = {
                 "&fText=%E7%94%9F%E6%88%90%E5%BC%8F%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD%E6%9C%8D%E5%8A%A1%E5%B7%B2%E5%A4%87%E6%A1%88%E5%92%8C%E5%B7%B2%E7%99%BB%E8%AE%B0%E4%BF%A1%E6%81%AF%EF%BC%882026%E5%B9%B46%E6%9C%88%EF%BC%89"),
         "title": "国家互联网信息办公室关于发布生成式人工智能服务已备案信息的公告",
         "roster_month": 6,
+        "record_title": "生成式人工智能服务已备案和已登记信息（2026年6月）",
+        "source": "cac_regs",
+        "source_genre": "institutional-commentary",
+        "date": "2026-07-10",
+        "document_number": None,
+        "publisher": "国家互联网信息办公室",
+        "pages": 8,
+        "rows_by_page": (21, 25, 24, 25, 25, 22, 26, 20),
+        "header_pages": (1, 6),
+        "pdf_sha256": "1ce457e44bc100ae49fa0240362d62655eafd72c8d5fb21a6b8ca223427a00b8",
+        "serial_ranges": ((869, 988), (531, 598)),
     },
     "cac_filing_2026_aug": {
         "parent": "https://www.cac.gov.cn/2024-04/02/c_1713729983803145.htm",
@@ -582,16 +606,17 @@ def write_capture(case, path, output, paragraphs, spans):
     return meta
 
 
-def roster_page(coordinates, expected_rows):
+def roster_page(coordinates, expected_rows, expected_columns):
     xs, ys, lines, operations, _ = coordinates
-    if len(xs) != 7 or len(ys) != expected_rows + 1 or len(lines) != len(xs) + len(ys):
+    if (expected_columns not in {6, 7} or len(xs) != expected_columns + 1
+            or len(ys) != expected_rows + 1 or len(lines) != len(xs) + len(ys)):
         raise CaptureError("roster_grid_shape")
     for axis, x1, y1, x2, y2 in lines:
         if axis == "h" and (abs(min(x1, x2) - xs[0]) > 0.6 or abs(max(x1, x2) - xs[-1]) > 0.6):
             raise CaptureError("roster_horizontal_grid_span")
         if axis == "v" and (abs(min(y1, y2) - ys[-1]) > 0.6 or abs(max(y1, y2) - ys[0]) > 0.6):
             raise CaptureError("roster_vertical_grid_span")
-    cells = [[[] for _ in range(6)] for _ in range(expected_rows)]
+    cells = [[[] for _ in range(expected_columns)] for _ in range(expected_rows)]
     row_edges = [-edge for edge in ys]
     before, after = [], []
     advance_crossings = 0
@@ -635,7 +660,7 @@ def measure_roster_geometry(reader):
                    "".join(block["text"] for block in operations)))}
         pages.append(row)
         try:
-            before, grid, after, _ = roster_page(coordinates, len(ys) - 1)
+            before, grid, after, _ = roster_page(coordinates, len(ys) - 1, len(xs) - 1)
         except CaptureError as error:
             row["layout_failure"] = str(error)
             continue
@@ -659,12 +684,13 @@ def read_roster(case, reader):
     headers = ("服务名称", "备案编号", "应用名称", "上线编号", "序号", "属地")
     text_bytes = 0
     counts = []
-    physical_rows = (24, 25, 24, 23)
-    if len(reader.pages) != len(physical_rows):
+    if len(reader.pages) != case["pages"]:
         raise CaptureError("roster_page_count")
-    serials = [[], []]
+    serials = []
     paragraphs, spans = [], []
-    for index, page in enumerate(reader.pages):
+    columns = case.get("columns_by_page", (6,) * case["pages"])
+    for page_number, (page, row_count, column_count) in enumerate(
+            zip(reader.pages, case["rows_by_page"], columns, strict=True), 1):
         plain, layout = (page.extract_text(extraction_mode=mode) or "" for mode in ("plain", "layout"))
         text_bytes += len(plain.encode("utf-8")) + len(layout.encode("utf-8"))
         if text_bytes > 3 * 1024 * 1024:
@@ -673,12 +699,16 @@ def read_roster(case, reader):
         xs, ys, lines, operations, diagnostics = annex_coordinates(page)
         positioned = [block for block in operations if block["text"].strip()]
         coordinate_inventory = Counter(compact("".join(block["text"] for block in positioned)))
-        before, rows, after, crossings = roster_page((xs, ys, lines, operations, diagnostics), physical_rows[index])
-        data_rows = rows[1:] if index in {0, 2} else rows
-        serials[index // 2].extend(compact(row[0]) for row in data_rows)
+        starts_table = page_number in case["header_pages"]
+        before, rows, after, crossings = roster_page(
+            (xs, ys, lines, operations, diagnostics), row_count + starts_table, column_count)
+        if starts_table:
+            serials.append([])
+        data_rows = rows[1:] if starts_table else rows
+        serials[-1].extend(compact(row[0]) for row in data_rows)
         row_order = compact(before + "".join(cell for row in rows for cell in row) + after)
         data_order = compact("".join(cell for row in data_rows for cell in row))
-        table_header = [compact(cell) for cell in rows[0]] if index in {0, 2} else []
+        table_header = [compact(cell) for cell in rows[0]] if starts_table else []
         inventory = Counter(ordered)
         if (not ordered or any(char in ordered + visual for char in ("\ufffd", "\x00"))
                 or inventory != Counter(visual) or inventory != coordinate_inventory
@@ -687,10 +717,10 @@ def read_roster(case, reader):
                 or any(" | " in cell for row in rows for cell in row)
                 or any(not cell or cell not in ordered for cell in table_header)
                 or (table_header and table_header[:2] != ["序号", "属地"])):
-            raise CaptureError(f"roster_page_fidelity_{index + 1}")
+            raise CaptureError(f"roster_page_fidelity_{page_number}")
         page_paragraphs = [text for text in (before, *(" | ".join(row) for row in rows), after) if text]
         paragraphs.extend(page_paragraphs)
-        spans.extend([(index + 1, index + 1)] * len(page_paragraphs))
+        spans.extend([(page_number, page_number)] * len(page_paragraphs))
         horizontal_lengths = Counter(round(abs(x2 - x1), 1) for kind, x1, _, x2, _ in lines if kind == "h")
         vertical_lengths = Counter(round(abs(y2 - y1), 1) for kind, _, y1, _, y2 in lines if kind == "v")
         origins = Counter(round(float(block["tx"]), 1) for block in positioned)
