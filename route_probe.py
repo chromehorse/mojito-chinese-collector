@@ -21,6 +21,7 @@ QIUSHI_INTERVIEW_SNAPSHOT = "https://web.archive.org/web/20260417202126id_/" + Q
 CAC_ROSTER_INDEX = "https://www.cac.gov.cn/2024-04/02/c_1713729983803145.htm"
 CAC_ROSTER_LABELS = {f"生成式人工智能服务已备案和已登记信息（2026年{month}月）": month
                      for month in (2, 4, 6, 8)}
+MEDIA_TYPE = re.compile(r"[a-z0-9.+-]{1,32}/[a-z0-9.+-]{1,64}")
 CASES = {
     "wuhan_action_plan": (
         ("municipal_original",
@@ -268,7 +269,7 @@ def probe_cac_rosters(fetcher):
                     continue
                 prefix = next(response.iter_raw(chunk_size=32), b"")
                 mime = response.headers.get("content-type", "").partition(";")[0].strip().lower()
-                row["mime"] = mime if re.fullmatch(r"[a-z0-9.+-]{1,32}/[a-z0-9.+-]{1,64}", mime) else "unrecognized"
+                row["mime"] = mime if MEDIA_TYPE.fullmatch(mime) else "unrecognized"
                 disposition = response.headers.get("content-disposition", "").partition(";")[0].strip().lower()
                 row["disposition"] = disposition if disposition in {"attachment", "inline"} else "unspecified"
                 if prefix.startswith(b"%PDF-"):

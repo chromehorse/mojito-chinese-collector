@@ -115,7 +115,7 @@ def fetch(case, quarantine):
         else:
             title = first_text(tree, "#con_title, h1") or ""
         if roster_month is not None:
-            from route_probe import CAC_ROSTER_INDEX, cac_roster_links
+            from route_probe import CAC_ROSTER_INDEX, MEDIA_TYPE, cac_roster_links
 
             url = cac_roster_links(page.text).get(roster_month)
             if parent != CAC_ROSTER_INDEX or title != case["title"] or not url:
@@ -146,8 +146,14 @@ def fetch(case, quarantine):
         with fetcher._client.stream("GET", url, follow_redirects=False,
                                     headers={"Accept": accept, "Accept-Encoding": "identity"}) as response:
             mime = response.headers.get("content-type", "").partition(";")[0].strip().casefold()
+            disposition = response.headers.get("content-disposition", "").partition(";")[0].strip().casefold()
             allowed_mime = {"application/pdf", "application/octet-stream"} if roster_month else {"application/pdf"}
-            if response.status_code != 200 or mime not in allowed_mime:
+            # All four registered CAC roster URLs sent malformed media types with an
+            # attachment disposition and PDF magic. Accept that publisher behavior here,
+            # retaining the signature check before writing and the offline PDF parser.
+            cac_attachment = bool(roster_month and mime and not MEDIA_TYPE.fullmatch(mime)
+                                  and disposition == "attachment")
+            if response.status_code != 200 or (mime not in allowed_mime and not cac_attachment):
                 if roster_month:
                     reported = {
                         *allowed_mime, "application/download", "application/force-download", "application/x-download",
@@ -167,7 +173,8 @@ def fetch(case, quarantine):
                     output.write(chunk)
             if not size:
                 raise CaptureError("empty_pdf")
-        return {"status": "downloaded", "bytes": size, **({"mime": mime} if roster_month else {})}
+        return {"status": "downloaded", "bytes": size,
+                **({"response_type": "cac_malformed_attachment" if cac_attachment else mime} if roster_month else {})}
     finally:
         fetcher.close()
 
