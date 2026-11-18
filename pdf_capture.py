@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+from tempfile import TemporaryDirectory
 import unicodedata
 from urllib.parse import urljoin, urlsplit
 
@@ -145,17 +146,14 @@ def inspect_dashed_folios(text_by_mode):
 def inspect_annex_grid(page):
     lines = set()
     horizontal, vertical = set(), set()
+    operators = Counter()
+    previous = None
 
     def location(x, y, matrix):
         a, b, c, d, e, f = matrix
         return round(a * x + c * y + e, 1), round(b * x + d * y + f, 1)
 
-    def inspect(operator, operands, cm, _):
-        if operator != b"re":
-            return
-        x, y, width, height = map(float, operands)
-        first = location(x, y, cm)
-        last = location(x + width, y + height, cm)
+    def segment(first, last):
         if abs(first[0] - last[0]) > 5 and abs(first[1] - last[1]) < 2:
             horizontal.add(first[1])
             lines.add(("h", *first, *last))
@@ -163,9 +161,31 @@ def inspect_annex_grid(page):
             vertical.add(first[0])
             lines.add(("v", *first, *last))
 
+    def inspect(operator, operands, cm, _):
+        nonlocal previous
+        if operator in {b"m", b"l", b"re", b"S", b"Do", b"f", b"f*"}:
+            operators[operator.decode()] += 1
+        if operator == b"re":
+            x, y, width, height = map(float, operands)
+            segment(location(x, y, cm), location(x + width, y + height, cm))
+        elif operator in {b"m", b"l"}:
+            current = location(*map(float, operands), cm)
+            if operator == b"l" and previous is not None:
+                segment(previous, current)
+            previous = current
+        elif operator in {b"S", b"s", b"f", b"f*", b"n"}:
+            previous = None
+
     page.extract_text(visitor_operand_before=inspect)
+    with TemporaryDirectory(prefix="pdf-annex-layout-") as directory:
+        path = Path(directory)
+        page.extract_text(extraction_mode="layout", layout_mode_debug_path=path)
+        blocks = json.loads((path / "bts.json").read_text(encoding="utf-8"))
+        operations = json.loads((path / "tjs.json").read_text(encoding="utf-8"))
     return {"horizontal_edges": sorted(horizontal), "vertical_edges": sorted(vertical),
-            "thin_rectangles": len(lines)}
+            "line_segments": len(lines), "path_operators": dict(operators),
+            "block_count": len(blocks), "block_fields": sorted(blocks[0]) if blocks else [],
+            "text_operators": len(operations), "text_fields": sorted(operations[0]) if operations else []}
 
 
 def score_pages(case, pages):
