@@ -1,6 +1,7 @@
 """Verify a registered publisher attachment and extract its text on a disposable VM."""
 
 import argparse
+from collections import Counter
 from contextlib import redirect_stderr, redirect_stdout
 from hashlib import sha256
 import json
@@ -48,6 +49,8 @@ CASES = {
         "publisher": "上海市经济和信息化委员会",
         "pages": 6,
         "title_meta": "ArticleTitle",
+        "dashed_folios": True,
+        "annex_page": 5,
         "anchors": {
             1: "2026年1月10日",
             2: "支持“AI+制造”样板企业梯度培育",
@@ -127,6 +130,42 @@ def fetch(case, quarantine):
 
 def compact(text):
     return re.sub(r"\s+", "", text)
+
+
+def inspect_dashed_folios(text_by_mode):
+    cleaned, counts = {}, {}
+    for mode, pages in text_by_mode.items():
+        matches = [re.subn(rf"[—–-][ \t]*{i}[ \t]*[—–-]", "", page)
+                   for i, page in enumerate(pages, 1)]
+        cleaned[mode] = [text for text, _ in matches]
+        counts[mode] = [count for _, count in matches]
+    return cleaned, counts
+
+
+def inspect_annex_grid(page):
+    lines = set()
+    horizontal, vertical = set(), set()
+
+    def location(x, y, matrix):
+        a, b, c, d, e, f = matrix
+        return round(a * x + c * y + e, 1), round(b * x + d * y + f, 1)
+
+    def inspect(operator, operands, cm, _):
+        if operator != b"re":
+            return
+        x, y, width, height = map(float, operands)
+        first = location(x, y, cm)
+        last = location(x + width, y + height, cm)
+        if abs(first[0] - last[0]) > 5 and abs(first[1] - last[1]) < 2:
+            horizontal.add(first[1])
+            lines.add(("h", *first, *last))
+        elif abs(first[1] - last[1]) > 5 and abs(first[0] - last[0]) < 2:
+            vertical.add(first[0])
+            lines.add(("v", *first, *last))
+
+    page.extract_text(visitor_operand_before=inspect)
+    return {"horizontal_edges": sorted(horizontal), "vertical_edges": sorted(vertical),
+            "thin_rectangles": len(lines)}
 
 
 def score_pages(case, pages):
@@ -252,6 +291,7 @@ def extract(case, quarantine, output=None):
             if sum(len(page.encode("utf-8")) for page in pages) > 3 * 1024 * 1024:
                 raise CaptureError("text_size_cap")
             text_by_mode[mode] = pages
+        table_grid = inspect_annex_grid(reader.pages[case["annex_page"] - 1]) if "annex_page" in case else None
     modes = {mode: score_pages(case, pages) for mode, pages in text_by_mode.items()}
     staged = {}
     if output is not None:
@@ -266,9 +306,21 @@ def extract(case, quarantine, output=None):
                   "cross_page_paragraphs": sum(first != last for first, last in spans)}
     page_modes_agree = [compact(plain) == compact(layout) for plain, layout in
                         zip(text_by_mode["plain"], text_by_mode["layout"], strict=True)]
+    layout_diagnostics = {}
+    if case.get("dashed_folios"):
+        cleaned, counts = inspect_dashed_folios(text_by_mode)
+        page_pairs = list(zip(cleaned["plain"], cleaned["layout"], strict=True))
+        layout_diagnostics = {
+            "folio_removals": counts,
+            "page_modes_agree_without_folios": [compact(a) == compact(b) for a, b in page_pairs],
+            "page_character_inventories_agree": [Counter(compact(a)) == Counter(compact(b)) for a, b in page_pairs],
+            "cross_page_without_folios": {mode: score_pages(case, pages)["cross_page_hits"]
+                                          for mode, pages in cleaned.items()},
+            "table_grid": table_grid,
+        }
     return {"status": "measured", "pages": case["pages"], "page_modes_agree": page_modes_agree,
             "expected_anchors": len(case["anchors"]),
-            "expected_cross_page": len(case["cross_page"]), "modes": modes, **staged}
+            "expected_cross_page": len(case["cross_page"]), "modes": modes, **layout_diagnostics, **staged}
 
 
 def main():
