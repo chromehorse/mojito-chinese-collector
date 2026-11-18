@@ -30,6 +30,7 @@ CONTROL_TEXT = {
     "content_30129344.html": (("第二十条规定",), "既有力度又有温度。"),
     "content_30130819.html": (("彭飞：", "曾毅："), "将人类社会引向万劫不复的危险境地。"),
 }
+CONTROL_FAILURES = {"control_markers", "control_ending_last_block", "control_ending_before_tail", "control_ending_missing"}
 ENTRY = {
     "id": "pd_epaper", "name": "人民日报 People's Daily e-paper",
     "kind": "listing", "allowed_domains": [HOST], "country": "CN", "language": "zh",
@@ -94,8 +95,13 @@ def parse_epaper(text, entry, url):
         body = parsed["body_paragraphs"]
         if not all(any(marker in paragraph for paragraph in body) for marker in markers):
             raise AdapterError("control_markers")
-        if not body[-1].endswith(ending):
-            raise AdapterError("control_ending")
+        compact_body = [re.sub(r"\s+", "", paragraph) for paragraph in body]
+        if not compact_body[-1].endswith(ending):
+            if ending in compact_body[-1]:
+                raise AdapterError("control_ending_last_block")
+            if any(ending in paragraph for paragraph in compact_body[:-1]):
+                raise AdapterError("control_ending_before_tail")
+            raise AdapterError("control_ending_missing")
     if not parsed["author"] and "（钟声）" in parsed["title"]:
         parsed["author"] = "钟声"
     return parsed
@@ -142,7 +148,7 @@ def collect(output, dates, *, verify_controls, cap=4, control_articles_only=Fals
                     outcome = "written" if report["written"] else "no_result"
                     if report["parse_failures"]:
                         detail = manifest["failures"][-1]["detail"]
-                        outcome = detail if detail in {"control_markers", "control_ending"} else "article_parse"
+                        outcome = detail if detail in CONTROL_FAILURES else "article_parse"
                     elif report["fetch_failures"]:
                         outcome = "article_fetch"
                     controls.append(outcome)
