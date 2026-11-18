@@ -8,6 +8,10 @@ on:
         type: choice
         options: [gov_policy_db, zrbzf_yanjiu, kxjszx_yanjiu]
         default: gov_policy_db
+      publish_private:
+        description: Send validated normalized text to private intake
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -18,6 +22,10 @@ jobs:
       github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-22.04
     timeout-minutes: 12
+    environment: private-intake
+    concurrency:
+      group: collector-intake
+      cancel-in-progress: false
     steps:
       - name: Retrieve trusted collector code
         run: |
@@ -28,11 +36,36 @@ jobs:
         run: |
           python3 -m venv "$RUNNER_TEMP/browser-runtime"
           "$RUNNER_TEMP/browser-runtime/bin/python" -m pip install --only-binary=:all: -r requirements.txt playwright==1.64.1
+          sudo useradd --system --user-group --no-create-home --shell /usr/sbin/nologin mojito-browser
+          base=/var/tmp/mojito-browser
+          sudo install -d -m 755 "$base" "$base/code" "$base/runtime"
+          sudo install -d -m 700 -o mojito-browser -g mojito-browser "$base/home" "$base/files"
+          sudo cp -a "$RUNNER_TEMP/browser-runtime/." "$base/runtime/"
+          sudo cp -r _sources.json run.py browser_capture.py scraper "$base/code/"
+          sudo chown -hR root:root "$base/code" "$base/runtime"
+          chmod 700 "$HOME" "$RUNNER_TEMP"
       - name: Test one approved publisher with the Chromium sandbox enabled
+        id: capture
+        continue-on-error: true
         env:
           RECIPE: ${{ inputs.recipe }}
         run: |
-          install -d -m 700 "$RUNNER_TEMP/browser-home" "$RUNNER_TEMP/browser-state"
-          timeout --signal=TERM 300s env -i HOME="$RUNNER_TEMP/browser-home" PATH=/usr/bin:/bin \
+          base=/var/tmp/mojito-browser
+          capture_status=0
+          sudo -u mojito-browser timeout --signal=TERM 300s env -i HOME="$base/home" PATH=/usr/bin:/bin \
             LANG=C.UTF-8 COLLECTOR_BROWSER=chrome \
-            "$RUNNER_TEMP/browser-runtime/bin/python" -B browser_capture.py "$RECIPE" "$RUNNER_TEMP/browser-state/output"
+            "$base/runtime/bin/python" -B "$base/code/browser_capture.py" "$RECIPE" "$base/files/output" \
+            || capture_status=$?
+          sudo pkill -KILL -u mojito-browser || [ "$?" -eq 1 ]
+          sudo chown -h "$(id -u):$(id -g)" "$base/files"
+          exit "$capture_status"
+      - name: Hand off validated normalized text
+        if: ${{ !cancelled() && inputs.publish_private && steps.capture.outcome == 'success' }}
+        env:
+          INTAKE_UPLOAD_TOKEN: ${{ secrets.INTAKE_UPLOAD_TOKEN }}
+        run: |
+          python3 -B chinese_collector_handoff.py push \
+            --repository chromehorse/mojito-chinese-intake --directory /var/tmp/mojito-browser/files
+      - name: Report browser failures
+        if: ${{ !cancelled() && steps.capture.outcome == 'failure' }}
+        run: exit 1
