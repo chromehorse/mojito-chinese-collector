@@ -1,0 +1,71 @@
+name: Isolated newspaper graphic inspection
+
+on:
+  workflow_dispatch:
+    inputs:
+      edition:
+        description: Registered original newspaper graphic
+        type: choice
+        options: [payments_mar17, safety_jan05, industry_jan22, patents_jan24, models_feb02, agents_feb14, companions_mar02, all]
+        default: payments_mar17
+      publish_private:
+        description: Stage incomplete inspection text and sanitized preview privately
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  inspect:
+    if: >-
+      github.repository == 'chromehorse/mojito-chinese-collector' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: private-intake
+    concurrency:
+      group: collector-intake
+      cancel-in-progress: false
+    steps:
+      - name: Retrieve trusted code
+        run: |
+          git init -q
+          git fetch -q --depth=1 "https://github.com/$GITHUB_REPOSITORY.git" "$GITHUB_SHA"
+          git checkout -q --detach FETCH_HEAD
+      - name: Prepare the existing collector and offline image tools
+        run: |
+          docker build -t mojito-chinese-collector .
+          docker build -f Dockerfile.image -t mojito-chinese-image .
+      - name: Verify the original article and linked JPEG off-device
+        env:
+          EDITION: ${{ inputs.edition }}
+        run: |
+          install -d -m 700 "$RUNNER_TEMP/mojito-image-quarantine"
+          timeout --signal=TERM 240s docker run --rm --read-only --cap-drop=ALL \
+            --security-opt=no-new-privileges --user "$(id -u):$(id -g)" \
+            --memory=256m --pids-limit=24 --ulimit fsize=8388608:8388608 \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/image_capture.py,destination=/collector/image_capture.py,readonly" \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/pd_epaper.py,destination=/collector/pd_epaper.py,readonly" \
+            --mount "type=bind,source=$RUNNER_TEMP/mojito-image-quarantine,destination=/quarantine" \
+            --entrypoint python mojito-chinese-collector -B /collector/image_capture.py fetch "$EDITION" /quarantine
+      - name: Decode and inspect without network access
+        env:
+          EDITION: ${{ inputs.edition }}
+        run: |
+          install -d -m 700 "$RUNNER_TEMP/mojito-image-text"
+          timeout --signal=TERM 300s docker run --rm --network=none --read-only --cap-drop=ALL \
+            --security-opt=no-new-privileges --user "$(id -u):$(id -g)" \
+            --cpus=1 --memory=768m --memory-swap=768m --pids-limit=24 --ulimit fsize=8388608:8388608 \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,size=32m \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/image_capture.py,destination=/collector/image_capture.py,readonly" \
+            --mount "type=bind,source=$RUNNER_TEMP/mojito-image-quarantine,destination=/quarantine,readonly" \
+            --mount "type=bind,source=$RUNNER_TEMP/mojito-image-text,destination=/data" \
+            mojito-chinese-image inspect "$EDITION" /quarantine --output /data/output
+      - name: Transfer incomplete inspection privately
+        if: ${{ inputs.publish_private }}
+        env:
+          INTAKE_UPLOAD_TOKEN: ${{ secrets.INTAKE_UPLOAD_TOKEN }}
+        run: |
+          python3 -B chinese_collector_handoff.py push --include-incomplete \
+            --repository chromehorse/mojito-chinese-intake --directory "$RUNNER_TEMP/mojito-image-text"
