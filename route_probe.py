@@ -83,6 +83,14 @@ CASES = {
          "", "甘政发〔2026〕1号"),
         ("heilongjiang_ai_plan", "https://www.hlj.gov.cn/hlj/c108372/202602/c00_31915429.shtml", "", "此件公开发布"),
     ),
+    "provincial_ai_policy": (
+        ("gansu_full_official_copy", "https://zsj.pingliang.gov.cn/cyzc/art/2026/art_d5e1e5ab4183477bb85294c3153b18e4.html",
+         "", "甘政发〔2026〕1号"),
+        ("heilongjiang_secondary_official_copy", "https://nynct.hlj.gov.cn/nynct/c115425/202602/c00_31916768.shtml",
+         "", "三、"),
+        ("fujian_current_provincial_plan", "https://www.fujian.gov.cn/zwgk/zfxxgk/szfwj/jgzz/fzggwjzc/202611/t20261112_7248400.htm",
+         "", "闽政办〔2026〕34号"),
+    ),
 }
 BODY = ("div.TRS_Editor", ".trs_editor_view", "#UCAP-CONTENT", "#ozoom", "#articleContent",
         "#article-content", "#article", "#content", ".content", ".article-content", ".article_content",
