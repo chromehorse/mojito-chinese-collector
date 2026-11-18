@@ -561,10 +561,22 @@ def measure_roster(reader):
         if text_bytes > 3 * 1024 * 1024:
             raise CaptureError("text_size_cap")
         ordered, visual = compact(plain), compact(layout)
+        xs, ys, lines, operations, diagnostics = annex_coordinates(page)
+        positioned = [block for block in operations if block["text"].strip()]
+        coordinate_inventory = Counter(compact("".join(block["text"] for block in positioned)))
+        horizontal_lengths = Counter(round(abs(x2 - x1), 1) for kind, x1, _, x2, _ in lines if kind == "h")
+        vertical_lengths = Counter(round(abs(y2 - y1), 1) for kind, _, y1, _, y2 in lines if kind == "v")
+        origins = Counter(round(float(block["tx"]), 1) for block in positioned)
         counts.append({"characters": len(ordered), "layout_characters": len(visual),
                        "same_order": ordered == visual, "same_characters": Counter(ordered) == Counter(visual),
                        "replacement_characters": ordered.count("\ufffd") + visual.count("\ufffd"),
-                       "header_matches": [header in visual for header in headers]})
+                       "header_matches": [header in visual for header in headers],
+                       "coordinate_inventory_matches": coordinate_inventory == Counter(ordered),
+                       "grid": {**diagnostics, "x_boundary_count": len(xs), "y_boundary_count": len(ys),
+                                "x_boundaries": xs[:16], "y_boundaries": ys[:40],
+                                "horizontal_lengths": horizontal_lengths.most_common(12),
+                                "vertical_lengths": vertical_lengths.most_common(12),
+                                "common_text_origins": origins.most_common(12)}})
     return {"status": "roster_measured", "pages": len(counts), "page_diagnostics": counts}
 
 
