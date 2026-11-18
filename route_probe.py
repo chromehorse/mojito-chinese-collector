@@ -5,7 +5,7 @@ import json
 import os
 from pathlib import Path
 import sys
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urljoin, urlsplit
 
 import httpx
 
@@ -17,6 +17,9 @@ QIUSHI_FIRST_ISSUE = "https://www.qstheory.cn/20251231/2b7c1a0955524272be96ac77c
 QIUSHI_SNAPSHOT = "https://web.archive.org/web/20260521082819id_/" + QIUSHI_FIRST_ISSUE
 QIUSHI_INTERVIEW = "https://www.qstheory.cn/20251231/18ec77b7dded4aa799e537c6068f8050/c.html"
 QIUSHI_INTERVIEW_SNAPSHOT = "https://web.archive.org/web/20260417202126id_/" + QIUSHI_INTERVIEW
+CAC_ROSTER_INDEX = "https://www.cac.gov.cn/2024-04/02/c_1713729983803145.htm"
+CAC_ROSTER_LABELS = {f"生成式人工智能服务已备案和已登记信息（2026年{month}月）": month
+                     for month in (2, 4, 6, 8)}
 CASES = {
     "wuhan_action_plan": (
         ("municipal_original",
@@ -214,6 +217,69 @@ def compare_qiushi_article(fetcher):
             "complete_match": same_metadata and same_body and complete}
 
 
+def cac_roster_links(html):
+    links = {month: set() for month in CAC_ROSTER_LABELS.values()}
+    for anchor in clean_tree(html).css("#BodyLabel a[href]"):
+        label = anchor.text(separator=" ", strip=True)
+        if label not in CAC_ROSTER_LABELS:
+            continue
+        url = urljoin(CAC_ROSTER_INDEX, anchor.attributes["href"])
+        parts = urlsplit(url)
+        if (parts.scheme, parts.netloc, parts.path, parts.fragment) != (
+                "https", "www.cac.gov.cn", "/cms/pub/interact/downloadfile.jsp", ""):
+            continue
+        try:
+            query = parse_qsl(parts.query, strict_parsing=True, max_num_fields=2, errors="strict")
+        except ValueError:
+            continue
+        if len(query) == 2 and set(dict(query)) == {"filepath", "fText"}:
+            fields = dict(query)
+            if fields["filepath"] and fields["fText"] == label:
+                links[CAC_ROSTER_LABELS[label]].add(url)
+    return {month: next(iter(urls)) for month, urls in links.items() if len(urls) == 1}
+
+
+def probe_cac_rosters(fetcher):
+    host = urlsplit(CAC_ROSTER_INDEX).hostname
+    page = fetcher.fetch(CAC_ROSTER_INDEX, [host])
+    if not page.ok or page.final_url != CAC_ROSTER_INDEX:
+        return [{"case": "cac_roster_index", "status": page.status or 0,
+                 "robots_blocked": fetcher.stats["robots_blocked"]}]
+    if "国家互联网信息办公室关于发布生成式人工智能服务已备案信息的公告" != first_text(
+            clean_tree(page.text), "#con_title, h1"):
+        return [{"case": "cac_roster_index", "status": 200, "title_verified": False}]
+    links = cac_roster_links(page.text)
+    results = [{"case": "cac_roster_index", "status": 200, "verified_periods": len(links)}]
+    for month, url in links.items():
+        row = {"case": "cac_roster_attachment", "period_end_month": month}
+        results.append(row)
+        if not fetcher._robots_allows(url):
+            row.update(status=0, robots_blocked=True)
+            continue
+        fetcher._polite_wait(url)
+        try:
+            with fetcher._client.stream("GET", url, follow_redirects=False,
+                                        headers={"Range": "bytes=0-31", "Accept-Encoding": "identity"}) as response:
+                row["status"] = response.status_code
+                if response.status_code in {401, 403, 429, 503}:
+                    break
+                if response.status_code not in {200, 206}:
+                    continue
+                prefix = next(response.iter_raw(chunk_size=32), b"")
+                mime = response.headers.get("content-type", "").partition(";")[0].strip().lower()
+                if prefix.startswith(b"%PDF-"):
+                    row["format"] = "pdf"
+                elif prefix.startswith(b"PK\x03\x04"):
+                    row["format"] = "zip-container"
+                elif prefix.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
+                    row["format"] = "office-compound-file"
+                else:
+                    row["format"] = "html" if mime == "text/html" else "unknown"
+        except httpx.HTTPError as error:
+            row.update(status=0, transport=type(error).__name__)
+    return results
+
+
 def main():
     case = sys.argv[1]
     archived_routes = {
@@ -221,16 +287,21 @@ def main():
         "wayback_qiushi_article": (QIUSHI_INTERVIEW, QIUSHI_INTERVIEW_SNAPSHOT, compare_qiushi_article),
     }
     archive = archived_routes.get(case)
-    cases = CASES[case] if archive is None else ()
-    urls = (url for _, url, _, _ in cases) if archive is None else archive[:2]
+    cases = CASES[case] if archive is None and case != "cac_rosters" else ()
+    urls = (CAC_ROSTER_INDEX,) if case == "cac_rosters" else archive[:2] if archive else (
+        url for _, url, _, _ in cases)
     domains = sorted({urlsplit(url).hostname for url in urls})
     with open(os.devnull, "w") as sink, redirect_stdout(sink), redirect_stderr(sink):
         fetcher = Fetcher(cache_dir=Path(os.environ.get("PUBLISHER_CACHE", "/tmp/publisher-probe")),
                           transport=httpx.HTTPTransport(trust_env=False),
                           strict_html_hosts={host: {} for host in domains})
         try:
-            results = ([inspect(fetcher, *case, domains) for case in cases] if not archive
-                       else [archive[2](fetcher)])
+            if case == "cac_rosters":
+                results = probe_cac_rosters(fetcher)
+            elif archive:
+                results = [archive[2](fetcher)]
+            else:
+                results = [inspect(fetcher, *entry, domains) for entry in cases]
         finally:
             fetcher.close()
     for row in results:
