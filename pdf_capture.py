@@ -349,10 +349,12 @@ def shanghai_annex(case, coordinates, plain, layout):
         if y > ys[0] or y < ys[-1]:
             outside.append(fragment)
             continue
-        matches = [cell for cell, (left, right, low, high) in boxes.items()
-                   if low < y < high and left <= x < right and end <= right + 0.5]
+        origins = [cell for cell, (left, right, low, high) in boxes.items()
+                   if low < y < high and left <= x < right]
+        matches = [cell for cell in origins if end <= boxes[cell][1] + 0.5]
         if len(matches) != 1:
-            raise CaptureError("annex_cell_position")
+            coordinates = (round(x, 2), round(y, 2), round(end, 2), round(float(operation["font_height"]), 2))
+            raise CaptureError(f"annex_cell_position {coordinates} origins={origins}")
         cells[matches[0]].append(fragment)
     texts = {cell: positioned_text(items, separate_lines=cell[1] == 4) for cell, items in cells.items()}
     normalized = {cell: compact(text) for cell, text in texts.items()}
