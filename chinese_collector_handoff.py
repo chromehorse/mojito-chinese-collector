@@ -7,8 +7,11 @@ import json
 import os
 from pathlib import Path
 import re
+from shlex import join as shell_join
+from shutil import which
 import subprocess
 from tempfile import TemporaryDirectory
+from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
@@ -128,7 +131,7 @@ def verify_private_repo(repository, token):
     return meta["default_branch"]
 
 
-def git(args, *, cwd=None, token=None, output=False):
+def git(args, *, cwd=None, token=None, ssh_config=None, output=False):
     env = {key: value for key, value in os.environ.items()
            if not key.startswith("GIT_") and key not in {"INTAKE_UPLOAD_TOKEN", "MOJITO_INTAKE_READ_TOKEN"}}
     env.update(GIT_TERMINAL_PROMPT="0", GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
@@ -138,6 +141,12 @@ def git(args, *, cwd=None, token=None, output=False):
                    GIT_CONFIG_VALUE_0=f"Authorization: Basic {auth}",
                    GIT_CONFIG_KEY_1="http.followRedirects", GIT_CONFIG_VALUE_1="false",
                    GIT_CONFIG_KEY_2="credential.helper", GIT_CONFIG_VALUE_2="")
+    if ssh_config is not None:
+        ssh = which("ssh")
+        if ssh is None:
+            raise ValueError("OpenSSH is required for deploy-key access.")
+        env["GIT_SSH_COMMAND"] = shell_join([Path(ssh).as_posix(), "-F", ssh_config.as_posix()])
+        env["GIT_SSH_VARIANT"] = "ssh"
     result = subprocess.run(["git", "-c", f"core.hooksPath={os.devnull}", *args], cwd=cwd, env=env,
                             stdout=subprocess.PIPE if output else subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL, check=False, timeout=180)
@@ -146,11 +155,13 @@ def git(args, *, cwd=None, token=None, output=False):
     return result.stdout
 
 
-def clone(repository, branch, destination, token, *, checkout):
+def clone(repository, branch, destination, token, *, checkout, ssh_config=None):
     options = ["--depth=1", "--no-tags", "--single-branch", "--branch", branch]
     if not checkout:
         options.append("--no-checkout")
-    git(["clone", *options, "--", f"https://github.com/{repository}.git", str(destination)], token=token)
+    url = (f"ssh://git@mojito-intake/{repository}.git" if ssh_config
+           else f"https://github.com/{repository}.git")
+    git(["clone", *options, "--", url, str(destination)], token=token, ssh_config=ssh_config)
 
 
 def stage_snapshot(repository, staging):
@@ -175,15 +186,17 @@ def stage_snapshot(repository, staging):
     return len(records)
 
 
-def pull_snapshot(repository, token, staging):
-    branch = verify_private_repo(repository, token)
+def pull_snapshot(repository, token, staging, *, ssh_config=None):
+    if not INTAKE_REPO.fullmatch(repository):
+        raise ValueError("Expected owner/mojito-chinese-intake.")
+    branch = "main" if ssh_config else verify_private_repo(repository, token)
     staging = staging.resolve()
     if staging.exists():
         raise ValueError("Choose a new staging directory for the download.")
     staging.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(prefix="mojito-intake-", dir=staging.parent) as work:
         clone_path = Path(work) / "repo"
-        clone(repository, branch, clone_path, token, checkout=False)
+        clone(repository, branch, clone_path, token, checkout=False, ssh_config=ssh_config)
         candidate = Path(work) / "snapshot"
         count = stage_snapshot(clone_path, candidate)
         candidate.rename(staging)
@@ -192,36 +205,55 @@ def pull_snapshot(repository, token, staging):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=("push", "pull"))
+    parser.add_argument("operation", choices=("check-write", "push", "pull"))
     parser.add_argument("--repository", required=True)
     parser.add_argument("--directory", type=Path, required=True)
+    parser.add_argument("--ssh-config", type=Path, help="local read-only deploy key configuration, pull only")
     args = parser.parse_args()
-    pushing = args.operation == "push"
+    pushing = args.operation != "pull"
+    if pushing and args.ssh_config:
+        parser.error("--ssh-config is for pull only")
     token = os.environ.pop("INTAKE_UPLOAD_TOKEN" if pushing else "MOJITO_INTAKE_READ_TOKEN", "")
-    if not token:
+    if not token and not args.ssh_config:
         print(json.dumps({"status": "missing_token"}))
         return 1
+    phase = "destination"
     try:
         directory = args.directory.resolve()
         if pushing:
             branch = verify_private_repo(args.repository, token)
             with TemporaryDirectory(prefix="mojito-intake-") as tmp:
                 repository = Path(tmp) / "repo"
+                phase = "clone"
                 clone(args.repository, branch, repository, token, checkout=True)
-                changed = merge_batch(directory, repository)
-                if changed:
-                    git(["add", "--", MANIFEST, *changed], cwd=repository)
-                    git(["-c", "user.name=mojito-intake", "-c", "user.email=mojito-intake@users.noreply.github.com",
-                         "commit", "-m", "Import normalized public sources"], cwd=repository)
-                    git(["push", "origin", f"HEAD:refs/heads/{branch}"], cwd=repository, token=token)
-                count = len(changed)
+                if args.operation == "check-write":
+                    phase = "write_access"
+                    git(["push", "--dry-run", "origin", f"HEAD:refs/heads/{branch}"], cwd=repository, token=token)
+                    count = 0
+                else:
+                    phase = "validate_batch"
+                    changed = merge_batch(directory, repository)
+                    if changed:
+                        phase = "commit"
+                        git(["add", "--", MANIFEST, *changed], cwd=repository)
+                        git(["-c", "user.name=mojito-intake", "-c",
+                             "user.email=mojito-intake@users.noreply.github.com",
+                             "commit", "-m", "Import normalized public sources"], cwd=repository)
+                        phase = "push"
+                        git(["push", "origin", f"HEAD:refs/heads/{branch}"], cwd=repository, token=token)
+                    count = len(changed)
         else:
-            count = pull_snapshot(args.repository, token, directory)
+            phase = "read_snapshot"
+            ssh_config = args.ssh_config.resolve(strict=True) if args.ssh_config else None
+            count = pull_snapshot(args.repository, None if ssh_config else token, directory, ssh_config=ssh_config)
         print(json.dumps({"status": "ok", "documents": count}))
         return 0
+    except HTTPError as error:
+        print(json.dumps({"status": "handoff_failed", "phase": phase, "http_status": error.code}))
+        return 1
     except Exception:
         # This command can run in a public workflow. Keep paths, URLs and credentials out of logs.
-        print(json.dumps({"status": "handoff_failed"}))
+        print(json.dumps({"status": "handoff_failed", "phase": phase}))
         return 1
 
 

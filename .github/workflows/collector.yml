@@ -8,6 +8,10 @@ on:
         description: Send validated text to private intake
         type: boolean
         default: false
+      verify_access:
+        description: Verify private repository read and write access without collecting
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -43,9 +47,11 @@ jobs:
           git checkout -q --detach FETCH_HEAD
 
       - name: Prepare the unprivileged collector container
+        if: ${{ !inputs.verify_access }}
         run: docker build -t mojito-chinese-collector .
 
       - name: Test three public publisher recipes
+        if: ${{ !inputs.verify_access }}
         id: probe
         continue-on-error: true
         run: |
@@ -58,11 +64,14 @@ jobs:
             --recipe mee_state_council --recipe shlab --recipe miit_kjs
 
       - name: Send text to the private intake repo
-        if: ${{ !cancelled() && inputs.publish_private }}
+        if: ${{ !cancelled() && (inputs.publish_private || inputs.verify_access) }}
         env:
           INTAKE_UPLOAD_TOKEN: ${{ secrets.INTAKE_UPLOAD_TOKEN }}
+          VERIFY_ACCESS: ${{ inputs.verify_access }}
         run: |
-          python3 -B chinese_collector_handoff.py push \
+          operation=push
+          if [ "$VERIFY_ACCESS" = true ]; then operation=check-write; fi
+          python3 -B chinese_collector_handoff.py "$operation" \
             --repository chromehorse/mojito-chinese-intake --directory "$RUNNER_TEMP/collector-state"
 
       - name: Report publisher probe failures
