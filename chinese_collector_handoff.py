@@ -78,6 +78,27 @@ def write_manifest(root, records):
     path.write_bytes(data)
 
 
+def complete_paper_byline(current, incoming):
+    """Fill a missing printed reporter in an otherwise identical e-paper edition."""
+    old_header, separator, old_body = current.decode("utf-8").partition("\n---\n")
+    new_header, _, new_body = incoming.decode("utf-8").partition("\n---\n")
+    authors = [line for line in new_header.splitlines() if line.startswith("author_printed:")]
+    author = re.fullmatch(r"author_printed: ([\u3400-\u9fff]{2,4})", authors[0]) if len(authors) == 1 else None
+    if (not separator or old_body != new_body or not author
+            or old_header.splitlines().count("author_printed: null") != 1
+            or old_header.splitlines().count("source_genre: institutional-commentary") != 1
+            or new_header.splitlines().count("source_genre: signed-essay") != 1):
+        return None
+    varying = ("author_printed:", "source_genre:", "fetched:")
+    old_fixed = [line for line in old_header.splitlines() if not line.startswith(varying)]
+    new_fixed = [line for line in new_header.splitlines() if not line.startswith(varying)]
+    if old_fixed != new_fixed:
+        return None
+    header = old_header.replace("\nauthor_printed: null\n", f"\nauthor_printed: {author[1]}\n", 1)
+    header = header.replace("\nsource_genre: institutional-commentary\n", "\nsource_genre: signed-essay\n", 1)
+    return (header + separator + old_body).encode("utf-8")
+
+
 def merge_batch(incoming, repository):
     """Retain distinct editions and return the exact paths for one commit."""
     path = repository / MANIFEST
@@ -90,15 +111,18 @@ def merge_batch(incoming, repository):
         relative = f"{NORMALIZED}/{rid}.md"
         data = bounded_read(incoming / relative)
         check_body(data, row)
+        target = repository / relative
         if rid in existing:
             if any(row[key] != existing[rid][key] for key in ("canonical_url", "content_hash")):
                 raise ValueError("A recorded edition identifier has a conflicting binding.")
+            if row["source"] == "pd_epaper" and (corrected := complete_paper_byline(bounded_read(target), data)):
+                target.write_bytes(corrected)
+                added.append(relative)
             continue
         if row["canonical_url"] in current_urls:
             row = {**row, "revision": "revision-detected"}
         current_urls.add(row["canonical_url"])
         existing[rid] = row
-        target = repository / relative
         if target.parent.resolve() != target.parent.absolute():
             raise ValueError("Unexpected linked directory in the intake repository.")
         target.parent.mkdir(parents=True, exist_ok=True)

@@ -30,7 +30,8 @@ CONTROL_TEXT = {
     "content_30129344.html": (("第二十条规定",), "既有力度又有温度。"),
     "content_30130819.html": (("彭飞：", "曾毅："), "以免把人类社会引向万劫不复的危险境地。"),
 }
-CONTROL_FAILURES = {"control_markers", "control_ending_last_block", "control_ending_before_tail", "control_ending_missing"}
+CONTROL_FAILURES = {"control_markers", "control_ending_last_block", "control_ending_before_tail",
+                    "control_ending_missing", "control_byline"}
 ENTRY = {
     "id": "pd_epaper", "name": "人民日报 People's Daily e-paper",
     "kind": "listing", "allowed_domains": [HOST], "country": "CN", "language": "zh",
@@ -90,6 +91,14 @@ def parse_epaper(text, entry, url):
     edition = re.fullmatch(r"/rmrb/pc/content/(\d{4})(\d{2})/(\d{2})/content_\d+\.html", path)
     if not edition or parsed["date"] != "-".join(edition.groups()):
         raise AdapterError("E-paper article date differs from the requested edition")
+    if not parsed["author"]:
+        year, month, day = edition.groups()
+        printed_date = rf"《人民日报》\s*[（(]{year}年0?{int(month)}月0?{int(day)}日"
+        visible = clean_tree(text).body.text(separator=" ", strip=True)
+        names = {re.sub(r"\s+", "", name) for name in re.findall(
+            rf"本报记者\s*((?:[\u3400-\u9fff]\s*){{2,4}}){printed_date}", visible)}
+        if len(names) == 1:
+            parsed["author"] = names.pop()
     if control := CONTROL_TEXT.get(path.rsplit("/", 1)[-1]):
         markers, ending = control
         body = parsed["body_paragraphs"]
@@ -104,6 +113,8 @@ def parse_epaper(text, entry, url):
             raise AdapterError("control_ending_missing")
     if not parsed["author"] and "（钟声）" in parsed["title"]:
         parsed["author"] = "钟声"
+    if path.endswith("/content_30129344.html") and parsed["author"] != "金歆":
+        raise AdapterError("control_byline")
     return parsed
 
 
