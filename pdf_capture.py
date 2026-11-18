@@ -786,6 +786,12 @@ def independent_pdf_text(path):
     return pages, images
 
 
+def boundary_folios(text):
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return [unicodedata.normalize("NFKC", lines[index]) for index in dict.fromkeys((0, len(lines) - 1))
+            if lines and re.fullmatch(r"[0-9IVXLCDMⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+", lines[index])]
+
+
 def inspect_attachment(case, reader, path):
     if not 1 <= len(reader.pages) <= 250 or case.get("pages", len(reader.pages)) != len(reader.pages):
         raise CaptureError("unexpected_page_count")
@@ -800,7 +806,7 @@ def inspect_attachment(case, reader, path):
         page = reader.pages[number]
         plain = page.extract_text(extraction_mode="plain") or ""
         layout = page.extract_text(extraction_mode="layout") or ""
-        text.append(compact(plain))
+        page_text = compact(plain)
         measurement = {"page": number + 1, "plain_characters": len(plain), "layout_characters": len(layout),
                        "same_character_inventory": Counter(compact(plain)) == Counter(compact(layout)),
                        "same_character_order": compact(plain) == compact(layout),
@@ -817,10 +823,25 @@ def inspect_attachment(case, reader, path):
                                extra_codepoints=sorted((ord(char), count) for char, count in extra.items()),
                                independent_replacement_characters=other[number].count("\ufffd"),
                                images=images[number + 1])
+            folios = [boundary_folios(value) for value in (plain, layout, other[number])]
+            common = set.intersection(*(set(values) for values in folios))
+            measurement.update(boundary_folios=folios, rotation=page.rotation,
+                               page_width=float(page.mediabox.width), page_height=float(page.mediabox.height))
+            if len(common) == 1 and all(len(values) == 1 for values in folios):
+                label = common.pop()
+                stripped = [compact(without_folio(value, label)) for value in (plain, layout, other[number])]
+                measurement.update(shared_boundary=label, same_order_without_boundary=stripped[0] == stripped[1],
+                                   independent_order_without_boundary=stripped[0] == stripped[2])
+                page_text = stripped[0]
+            if not measurement["same_character_inventory"]:
+                rotated = page.extract_text(extraction_mode="layout", layout_mode_strip_rotated=False) or ""
+                measurement.update(rotated_layout_inventory_matches=Counter(compact(plain)) == Counter(compact(rotated)),
+                                   rotated_layout_order_matches=compact(plain) == compact(rotated))
+        text.append(page_text)
         measurements.append(measurement)
     return {"status": "attachment_measured", "pages": len(reader.pages), "samples": measurements,
-            "column_labels": dict(Counter(re.findall(r"专栏(\d+)", "".join(text)))),
-            "figure_labels": dict(Counter(re.findall(r"图(\d+)", "".join(text)))),
+            "column_labels": dict(Counter(label for page in text for label in re.findall(r"专栏(\d+)", page))),
+            "figure_labels": dict(Counter(label for page in text for label in re.findall(r"图(\d+)", page))),
             "attachment_sha256": sha256(path.read_bytes()).hexdigest()}
 
 
