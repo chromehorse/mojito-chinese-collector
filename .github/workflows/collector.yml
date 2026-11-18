@@ -51,6 +51,7 @@ jobs:
     timeout-minutes: 45
     concurrency:
       group: collector-intake
+      queue: max
       cancel-in-progress: false
     environment: private-intake
     steps:

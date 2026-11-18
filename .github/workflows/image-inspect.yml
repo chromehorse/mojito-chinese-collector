@@ -25,6 +25,7 @@ jobs:
     environment: private-intake
     concurrency:
       group: collector-intake
+      queue: max
       cancel-in-progress: false
     steps:
       - name: Retrieve trusted code
