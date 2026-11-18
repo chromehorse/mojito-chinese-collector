@@ -31,6 +31,9 @@ CASES = {
         "title_selector": "title",
         "parent_archive_timestamp": "20260719101554",
         "archive_timestamp": "20260324133111",
+        "pdf_sha256": "29b3c70720b1faff458a123cb29672ee2ee8874a53b6d4a91f402a73f6945027",
+        "pages": 140,
+        "inspect_all_pages": True,
         "probe_only": True,
     },
     "cac_filing_2026_feb": {
@@ -753,30 +756,88 @@ def read_roster(case, reader):
              "tables": table_diagnostics}, paragraphs, spans)
 
 
+def independent_pdf_text(path):
+    import subprocess
+    from tempfile import TemporaryDirectory
+
+    results = []
+    with TemporaryDirectory() as folder:
+        for command in (("pdftotext", "-enc", "UTF-8", "-layout", str(path), "-"),
+                        ("pdfimages", "-list", str(path))):
+            target = Path(folder) / command[0]
+            with target.open("xb") as stream:
+                subprocess.run(command, stdout=stream, stderr=subprocess.PIPE, check=True, timeout=90)
+            with target.open("rb") as stream:
+                data = stream.read(3 * 1024 * 1024 + 1)
+            if len(data) > 3 * 1024 * 1024:
+                raise CaptureError("independent_text_size_cap")
+            results.append(data.decode("utf-8"))
+    pages = results[0].split("\f")
+    if pages and not pages[-1].strip():
+        pages.pop()
+    images = Counter()
+    for line in results[1].splitlines()[2:]:
+        if not line.strip():
+            continue
+        match = re.match(r"^\s*(\d+)\s+\d+\s+(?:image|mask|smask)\s", line)
+        if match is None or not 1 <= int(match[1]) <= len(pages):
+            raise CaptureError("unexpected_image_inventory")
+        images[int(match[1])] += 1
+    return pages, images
+
+
+def inspect_attachment(case, reader, path):
+    if not 1 <= len(reader.pages) <= 250 or case.get("pages", len(reader.pages)) != len(reader.pages):
+        raise CaptureError("unexpected_page_count")
+    all_pages = case.get("inspect_all_pages")
+    other, images = independent_pdf_text(path) if all_pages else (None, None)
+    if other is not None and len(other) != len(reader.pages):
+        raise CaptureError("independent_page_count")
+    numbers = (range(len(reader.pages)) if all_pages
+               else sorted({0, min(9, len(reader.pages) - 1), len(reader.pages) // 2, len(reader.pages) - 1}))
+    measurements, text = [], []
+    for number in numbers:
+        page = reader.pages[number]
+        plain = page.extract_text(extraction_mode="plain") or ""
+        layout = page.extract_text(extraction_mode="layout") or ""
+        text.append(compact(plain))
+        measurement = {"page": number + 1, "plain_characters": len(plain), "layout_characters": len(layout),
+                       "same_character_inventory": Counter(compact(plain)) == Counter(compact(layout)),
+                       "same_character_order": compact(plain) == compact(layout),
+                       "chinese_characters": len(re.findall(r"[\u3400-\u9fff]", plain)),
+                       "replacement_characters": plain.count("\ufffd") + layout.count("\ufffd")}
+        if other is not None:
+            comparison = compact(other[number])
+            missing = Counter(compact(plain)) - Counter(comparison)
+            extra = Counter(comparison) - Counter(compact(plain))
+            measurement.update(independent_characters=len(other[number]),
+                               independent_inventory_matches=not missing and not extra,
+                               independent_order_matches=compact(plain) == comparison,
+                               missing_codepoints=sorted((ord(char), count) for char, count in missing.items()),
+                               extra_codepoints=sorted((ord(char), count) for char, count in extra.items()),
+                               independent_replacement_characters=other[number].count("\ufffd"),
+                               images=images[number + 1])
+        measurements.append(measurement)
+    return {"status": "attachment_measured", "pages": len(reader.pages), "samples": measurements,
+            "column_labels": dict(Counter(re.findall(r"专栏(\d+)", "".join(text)))),
+            "figure_labels": dict(Counter(re.findall(r"图(\d+)", "".join(text)))),
+            "attachment_sha256": sha256(path.read_bytes()).hexdigest()}
+
+
 def extract(case, quarantine, output=None):
     from pypdf import PdfReader
 
     path = quarantine / "attachment.pdf"
-    if "roster_month" in case and sha256(path.read_bytes()).hexdigest() != case["pdf_sha256"]:
-        raise CaptureError("roster_pdf_changed")
+    if case.get("pdf_sha256") and sha256(path.read_bytes()).hexdigest() != case["pdf_sha256"]:
+        raise CaptureError("roster_pdf_changed" if "roster_month" in case else "pdf_changed")
     with path.open("rb") as stream:
         reader = PdfReader(stream, strict=True)
         if reader.is_encrypted:
             raise CaptureError("encrypted_pdf")
         if case.get("probe_only"):
-            if output is not None or not 1 <= len(reader.pages) <= 250:
+            if output is not None:
                 raise CaptureError("inspection_not_capture")
-            samples = []
-            for number in sorted({0, min(9, len(reader.pages) - 1), len(reader.pages) // 2, len(reader.pages) - 1}):
-                page = reader.pages[number]
-                plain = page.extract_text(extraction_mode="plain") or ""
-                layout = page.extract_text(extraction_mode="layout") or ""
-                samples.append({"page": number + 1, "plain_characters": len(plain), "layout_characters": len(layout),
-                                "same_character_inventory": Counter(compact(plain)) == Counter(compact(layout)),
-                                "chinese_characters": len(re.findall(r"[\u3400-\u9fff]", plain)),
-                                "replacement_characters": plain.count("\ufffd") + layout.count("\ufffd")})
-            return {"status": "attachment_measured", "pages": len(reader.pages), "samples": samples,
-                    "attachment_sha256": sha256(path.read_bytes()).hexdigest()}
+            return inspect_attachment(case, reader, path)
         if "roster_month" in case:
             measurement, paragraphs, spans = read_roster(case, reader)
             staged = {}

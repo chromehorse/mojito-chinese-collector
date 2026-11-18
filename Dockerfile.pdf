@@ -1,6 +1,9 @@
 FROM mojito-chinese-collector
 
 USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends poppler-utils \
+    && rm -rf /var/lib/apt/lists/*
 RUN printf '%s\n' 'pypdf==7.1.0 --hash=sha256:47cca6b24bdcf4c4d65b5f7b8b972535c61710a061261e737688777cfd9a7bfb' > /tmp/requirements-pdf.txt \
     && python -m pip install --no-cache-dir --no-deps --only-binary=:all: --require-hashes -r /tmp/requirements-pdf.txt \
     && rm /tmp/requirements-pdf.txt
