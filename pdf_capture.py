@@ -9,7 +9,6 @@ from math import isfinite
 import os
 from pathlib import Path
 import re
-from tempfile import TemporaryDirectory
 from traceback import extract_tb
 import unicodedata
 from urllib.parse import urljoin, urlsplit
@@ -147,7 +146,9 @@ def inspect_dashed_folios(text_by_mode):
 
 
 def annex_coordinates(page):
-    from pypdf._text_extraction._layout_mode import text_show_operations
+    from pypdf._text_extraction._layout_mode._fixed_width_page import (
+        TextStateManager, recurse_to_target_op, set_font_operation,
+    )
 
     lines = set()
     horizontal, vertical = set(), set()
@@ -185,14 +186,21 @@ def annex_coordinates(page):
     contents = page.get_contents()
     if contents is None:
         raise CaptureError("annex_content_missing")
-    # This uses the pinned layout extractor's in-memory blocks. Its optional
-    # debug export cannot serialize this document's font resources.
-    blocks = text_show_operations(iter(contents.operations), page._layout_mode_fonts(), True)
-    with TemporaryDirectory(prefix="annex-coordinates-") as directory:
-        scratch = Path(directory)
-        blocks = text_show_operations(iter(contents.operations), page._layout_mode_fonts(), True, scratch)
-        operations = json.loads((scratch / "tjs.json").read_text(encoding="utf-8"))
-    return (sorted(vertical), sorted(horizontal, reverse=True), lines, operations,
+    # Reuse the pinned layout engine before it shifts the blocks left. The
+    # table borders and text origins must share the page's coordinate system.
+    fonts = page._layout_mode_fonts()
+    state = TextStateManager()
+    operations = iter(contents.operations)
+    blocks = []
+    for operands, operator in operations:
+        if operator in (b"BT", b"q"):
+            groups, _ = recurse_to_target_op(operations, state, b"ET" if operator == b"BT" else b"Q", fonts, True)
+            blocks.extend(groups)
+        elif operator == b"Tf":
+            set_font_operation(state, fonts, operands)
+        else:
+            state.set_state_param(operator, operands)
+    return (sorted(vertical), sorted(horizontal, reverse=True), lines, blocks,
             {"line_segments": len(lines), "path_operators": dict(operators), "block_count": len(blocks)})
 
 
@@ -344,7 +352,7 @@ def shanghai_annex(case, coordinates, plain, layout):
         if not text.strip():
             continue
         x, y, end = (float(operation[k]) for k in ("tx", "ty", "displaced_tx"))
-        if operation["rotated"] or not all(map(isfinite, (x, y, end))) or end < x:
+        if operation["flip_sort"] != 1 or not all(map(isfinite, (x, y, end))) or end < x:
             raise CaptureError("annex_invalid_text_position")
         fragment = (y, x, end, text)
         if y > ys[0] or y < ys[-1]:
