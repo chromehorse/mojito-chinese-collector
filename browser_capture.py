@@ -8,7 +8,6 @@ import sys
 from urllib.parse import urlsplit
 
 import httpx
-from playwright.sync_api import Error, sync_playwright
 
 from run import load_manifest, save_manifest
 from scraper.adapters._common import AdapterError, clean_tree, extract_links, parse_article
@@ -28,6 +27,7 @@ RESOURCE_TYPES = {
 }
 ARTICLE_PATH = r"/portal/journal/portal/client/paper/[0-9a-f]+(?:[?#].*)?$"
 GOV_LATEST = "https://www.gov.cn/zhengce/zuixin/"
+AI_POLICY_TERMS = ("人工智能", "大模型", "智能体", "具身智能", "智能算力", "算法推荐", "深度合成")
 MAX_BROWSER_REQUESTS = 72
 MAX_BROWSER_BYTES = 25 * 1024 * 1024
 
@@ -37,7 +37,16 @@ def exact_origin(url, domains):
     return parts.scheme == "https" and parts.netloc == parts.hostname and parts.hostname in domains
 
 
+def ai_policy_relevant(title, paragraphs):
+    if any(term in title for term in AI_POLICY_TERMS):
+        return True
+    matching = [p for p in paragraphs if any(term in p for term in AI_POLICY_TERMS)]
+    return len(matching) >= 2 or any(len(p) >= 100 for p in matching)
+
+
 def capture(entry, output):
+    from playwright.sync_api import Error, sync_playwright
+
     recipe = entry["recipe"]
     domains = set(entry["allowed_domains"])
     listing = GOV_LATEST if entry["id"] == "gov_policy_db" else recipe.get("rung_a_endpoint", entry["list_url"])
@@ -133,7 +142,10 @@ def capture(entry, output):
                     summary["parse_failures"] += 1
                     continue
                 summary["parsed"] += 1
-                if not is_relevant(parsed["title"], "\n".join(parsed["body_paragraphs"])):
+                relevant = (ai_policy_relevant(parsed["title"], parsed["body_paragraphs"])
+                            if entry["id"] == "gov_policy_db" else
+                            is_relevant(parsed["title"], "\n".join(parsed["body_paragraphs"])))
+                if not relevant:
                     continue
                 complete = not recipe.get("abstract_only", False)
                 row, paragraphs = build_record(parsed, entry, url, utcnow().isoformat(), body_complete=complete)
@@ -146,7 +158,7 @@ def capture(entry, output):
                     "republication_of", "body_complete", "fetched")}
                 summary["written"] += 1
                 summary["abstracts"] += int(not complete)
-            if summary["written"]:
+            if summary["parsed"]:
                 manifest_path = output / "manifest.json"
                 save_manifest(manifest, manifest_path)
                 # The parent stays private until the renderer exits and the uploader owns it.

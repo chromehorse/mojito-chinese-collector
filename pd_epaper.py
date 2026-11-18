@@ -97,7 +97,7 @@ def collect(output, dates, *, verify_controls):
                     totals[key] += report[key]
     finally:
         fetcher.close()
-    if totals["written"]:
+    if totals["parsed"]:
         save_manifest(manifest, manifest_path)
     if not totals["discovered"] or totals["fetch_failures"] or totals["parse_failures"]:
         totals["status"] = "partial"
