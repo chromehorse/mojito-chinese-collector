@@ -32,6 +32,7 @@ jobs:
       - name: Prepare the unprivileged collector container
         run: docker build -t mojito-chinese-collector .
       - name: Measure approved publisher layouts
+        if: matrix.source != 'qiushi_january'
         env:
           PUBLISHER: ${{ matrix.source }}
         run: |
@@ -40,6 +41,16 @@ jobs:
             --tmpfs /tmp:rw,nosuid,nodev,noexec,size=32m \
             --mount "type=bind,source=$GITHUB_WORKSPACE/route_probe.py,destination=/collector/route_probe.py,readonly" \
             --entrypoint python mojito-chinese-collector -B /collector/route_probe.py "$PUBLISHER"
+      - name: Verify the first Qiushi issue that could not be fetched locally
+        if: matrix.source == 'qiushi_january'
+        run: |
+          timeout --signal=TERM 300s docker run --rm --read-only --cap-drop=ALL \
+            --security-opt=no-new-privileges --memory=1024m --pids-limit=64 \
+            --tmpfs /data:rw,nosuid,nodev,noexec,size=32m,mode=1777 \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,size=32m \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/chinese_backfill.py,destination=/collector/chinese_backfill.py,readonly" \
+            --entrypoint python mojito-chinese-collector -B /collector/chinese_backfill.py \
+            --summary-only --data /data --recipe qiushi --year 2026 --last-issue 1 --cap 6
       - name: Check both e-paper columns through normal normalization
         if: matrix.source == 'people'
         run: |
