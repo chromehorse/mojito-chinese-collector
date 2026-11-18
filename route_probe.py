@@ -13,6 +13,8 @@ from scraper.adapters._common import clean_tree, complete_body_paragraphs, extra
 from scraper.fetcher import Fetcher
 
 
+QIUSHI_FIRST_ISSUE = "https://www.qstheory.cn/20251231/2b7c1a0955524272be96ac77ccff34eb/c.html"
+QIUSHI_SNAPSHOT = "https://web.archive.org/web/20260521082819id_/" + QIUSHI_FIRST_ISSUE
 CASES = {
     "people": (
         ("commentary_index", "https://opinion.people.com.cn/GB/8213/49160/index.html", r"/n1/\d{4}/", ""),
@@ -65,6 +67,11 @@ CASES = {
         ("zhejiang_cac_copy", "https://www.zjwx.gov.cn/col/col1673566/art/2026/art_dc78f935ade4450c9f4e9aea8933fb33.html", "", "第三十七条"),
         ("ordos_copy", "https://www.ordos.gov.cn/zwgk/zc/xzgfxwj/xxyxgfxwj/zfjqbm/sgyhxxhj/202605/t20260515_2041041.html", "", "第三十七条"),
     ),
+    "nea_energy": (
+        ("issuer_policy", "https://www.nea.gov.cn/20260508/4dae97ca01d348e4871bb8654be34b3a/c.html", "", "国能发科技〔2026〕34号"),
+        ("energy_bureau_copy", "https://xxgk.jcgov.gov.cn/szfgzbm/jcsnyj/fdzdgknr_31618/fgwj_31628/202605/t20260511_2348831.shtml",
+         "", "国能发科技〔2026〕34号"),
+    ),
 }
 BODY = ("div.TRS_Editor", ".trs_editor_view", "#UCAP-CONTENT", "#ozoom", "#articleContent",
         "#article-content", "#article", "#content", ".content", ".article-content", ".article_content",
@@ -100,15 +107,34 @@ def inspect(fetcher, name, url, pattern, marker, domains):
             "bodies": bodies, "inline_papers": len(tree.css("div.paperBox"))}
 
 
+def compare_qiushi_archive(fetcher):
+    original_host = urlsplit(QIUSHI_FIRST_ISSUE).hostname
+    archive_host = urlsplit(QIUSHI_SNAPSHOT).hostname
+    original = fetcher.fetch(QIUSHI_FIRST_ISSUE, [original_host])
+    archived = fetcher.fetch(QIUSHI_SNAPSHOT, [archive_host])
+    result = {"case": "qiushi_snapshot", "publisher_status": original.status or 0,
+              "archive_status": archived.status or 0, "robots_blocked": fetcher.stats["robots_blocked"]}
+    if original.ok and archived.ok and archived.final_url == QIUSHI_SNAPSHOT:
+        pattern = r"/\d{8}/[0-9a-f]{32}/c\.html?$"
+        live_links, archive_links = (extract_links(response.text, QIUSHI_FIRST_ISSUE, "div.highlight a",
+                                                   [original_host], pattern) for response in (original, archived))
+        result.update(live_links=len(live_links), archive_links=len(archive_links),
+                      same_links=bool(live_links) and live_links == archive_links)
+    return result
+
+
 def main():
-    cases = CASES[sys.argv[1]]
-    domains = sorted({urlsplit(url).hostname for _, url, _, _ in cases})
+    archive = sys.argv[1] == "wayback_qiushi"
+    cases = CASES[sys.argv[1]] if not archive else ()
+    domains = (sorted({urlsplit(url).hostname for _, url, _, _ in cases}) if not archive
+               else [urlsplit(url).hostname for url in (QIUSHI_FIRST_ISSUE, QIUSHI_SNAPSHOT)])
     with open(os.devnull, "w") as sink, redirect_stdout(sink), redirect_stderr(sink):
         fetcher = Fetcher(cache_dir=Path(os.environ.get("PUBLISHER_CACHE", "/tmp/publisher-probe")),
                           transport=httpx.HTTPTransport(trust_env=False),
                           strict_html_hosts={host: {} for host in domains})
         try:
-            results = [inspect(fetcher, *case, domains) for case in cases]
+            results = ([inspect(fetcher, *case, domains) for case in cases] if not archive
+                       else [compare_qiushi_archive(fetcher)])
         finally:
             fetcher.close()
     for row in results:

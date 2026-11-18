@@ -11,9 +11,9 @@ import re
 from urllib.parse import urljoin, urlsplit
 
 if __package__ == "tools":
-    from tools.chinese_collector import collection_lock
+    from tools.chinese_collector import collection_lock, nda_attachment_announcement
 else:
-    from chinese_collector import collection_lock
+    from chinese_collector import collection_lock, nda_attachment_announcement
 
 
 def qiushi_issues(entry, fetcher, year):
@@ -99,10 +99,8 @@ def collect(data, recipe_id, year, first_issue, last_issue, local_manifest, cap=
                     outside_year.append(url)
                     # Keep this response outside the requested edition. Do not mark it irrelevant.
                     raise AdapterError("Publication date outside the requested year")
-                if (recipe_id == "nda_ai_policy" and article["title"].endswith("》印发")
-                        and article["body_paragraphs"][-1] in {"附件：", "附件:"}
-                        and not any(re.match(r"[一二三四五六七八九十]+、", paragraph)
-                                    for paragraph in article["body_paragraphs"])):
+                if recipe_id == "nda_ai_policy" and nda_attachment_announcement(
+                        article["title"], article["body_paragraphs"]):
                     raise AdapterError("Policy announcement links to a separate edition")
                 return article
 

@@ -52,6 +52,12 @@ def parse_miit_article(text, entry, url):
     return article
 
 
+def nda_attachment_announcement(title, paragraphs):
+    """Identify NDA notices whose policy is referenced in a separate attachment."""
+    return (title.endswith("》印发") and paragraphs[-1] in {"附件：", "附件:"}
+            and not any(re.match(r"[一二三四五六七八九十]+、", paragraph) for paragraph in paragraphs))
+
+
 def package(scraper, destination):
     scraper = scraper.resolve(strict=True)
     destination = destination.resolve()
