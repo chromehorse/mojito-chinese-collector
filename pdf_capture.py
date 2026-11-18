@@ -607,7 +607,8 @@ def measure_roster(reader):
         data_rows = rows[1:] if index in {0, 2} else rows
         serials[index // 2].extend(compact(row[0]) for row in data_rows)
         row_order = compact(before + "".join(cell for row in rows for cell in row) + after)
-        flat_column_widths = [len(cell) for cell in rows[0]] if index in {0, 2} else []
+        data_order = compact("".join(cell for row in data_rows for cell in row))
+        table_header = [compact(cell) for cell in rows[0]] if index in {0, 2} else []
         horizontal_lengths = Counter(round(abs(x2 - x1), 1) for kind, x1, _, x2, _ in lines if kind == "h")
         vertical_lengths = Counter(round(abs(y2 - y1), 1) for kind, _, y1, _, y2 in lines if kind == "v")
         origins = Counter(round(float(block["tx"]), 1) for block in positioned)
@@ -619,17 +620,27 @@ def measure_roster(reader):
                        "row_inventory_matches": Counter(row_order) == coordinate_inventory,
                        "row_order_matches_stream": row_order == ordered,
                        "row_order_matches_layout": row_order == visual,
+                       "data_order_in_stream": ordered.count(data_order) == 1 if data_order else False,
+                       "header_cells_in_stream": all(cell in ordered for cell in table_header),
+                       "header_index_and_region": table_header[:2] == ["序号", "属地"] if table_header else None,
                        "all_cells_present": all(cell for row in rows for cell in row),
-                       "data_rows": len(data_rows), "header_lengths": flat_column_widths,
+                       "data_rows": len(data_rows), "header_lengths": list(map(len, table_header)),
                        "advance_crossings": crossings, "outside_characters": len(compact(before + after)),
                        "grid": {**diagnostics, "x_boundary_count": len(xs), "y_boundary_count": len(ys),
                                 "x_boundaries": xs[:16], "y_boundaries": ys[:40],
                                 "horizontal_lengths": horizontal_lengths.most_common(12),
                                 "vertical_lengths": vertical_lengths.most_common(12),
                                 "common_text_origins": origins.most_common(12)}})
+    table_diagnostics = []
+    for values in serials:
+        numbers = [int(value) for value in values if re.fullmatch(r"[0-9]{1,5}", value)]
+        start = numbers[0] if numbers else 0
+        table_diagnostics.append({"rows": len(values), "integer_serials": len(numbers),
+                                  "first_serial": start, "last_serial": numbers[-1] if numbers else 0,
+                                  "sequential": len(numbers) == len(values) and numbers == list(
+                                      range(start, start + len(numbers)))})
     return {"status": "roster_measured", "pages": len(counts), "page_diagnostics": counts,
-            "sequential_tables": [values == [str(i) for i in range(1, total + 1)]
-                                  for values, total in zip(serials, (48, 46), strict=True)]}
+            "tables": table_diagnostics}
 
 
 def extract(case, quarantine, output=None):
@@ -643,7 +654,7 @@ def extract(case, quarantine, output=None):
         if "roster_month" in case:
             if output is not None:
                 raise CaptureError("roster_measurement_only")
-            return measure_roster(reader)
+            return {**measure_roster(reader), "attachment_sha256": sha256(path.read_bytes()).hexdigest()}
         if len(reader.pages) != case["pages"]:
             raise CaptureError("unexpected_page_count")
         text_by_mode = {}
