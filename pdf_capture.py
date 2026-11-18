@@ -549,13 +549,52 @@ def write_capture(case, path, output, paragraphs, spans):
     save_manifest(manifest, manifest_path)
 
 
+def roster_page(coordinates, expected_rows):
+    xs, ys, lines, operations, _ = coordinates
+    if len(xs) != 7 or len(ys) != expected_rows + 1 or len(lines) != len(xs) + len(ys):
+        raise CaptureError("roster_grid_shape")
+    for axis, x1, y1, x2, y2 in lines:
+        if axis == "h" and (abs(min(x1, x2) - xs[0]) > 0.6 or abs(max(x1, x2) - xs[-1]) > 0.6):
+            raise CaptureError("roster_horizontal_grid_span")
+        if axis == "v" and (abs(min(y1, y2) - ys[-1]) > 0.6 or abs(max(y1, y2) - ys[0]) > 0.6):
+            raise CaptureError("roster_vertical_grid_span")
+    cells = [[[] for _ in range(6)] for _ in range(expected_rows)]
+    row_edges = [-edge for edge in ys]
+    before, after = [], []
+    advance_crossings = 0
+    for operation in operations:
+        text = operation["text"]
+        if not text.strip():
+            continue
+        x, y, end = (float(operation[key]) for key in ("tx", "ty", "displaced_tx"))
+        if operation["flip_sort"] != 1 or not all(map(isfinite, (x, y, end))) or end < x:
+            raise CaptureError("roster_invalid_text_position")
+        fragment = (y, x, end, text)
+        if y >= ys[0] or y <= ys[-1]:
+            (before if y >= ys[0] else after).append(fragment)
+            continue
+        column = bisect_right(xs, x) - 1
+        row = bisect_right(row_edges, -y) - 1
+        if not 0 <= column < len(xs) - 1 or not 0 <= row < len(ys) - 1 or abs(y - ys[row]) <= 0.1:
+            raise CaptureError("roster_cell_position")
+        cells[row][column].append(fragment)
+        advance_crossings += end > xs[column + 1] + 0.5
+    return (positioned_text(before, separate_lines=True),
+            [[positioned_text(cell) for cell in row] for row in cells],
+            positioned_text(after, separate_lines=True), advance_crossings)
+
+
 def measure_roster(reader):
     if not 1 <= len(reader.pages) <= 160:
         raise CaptureError("roster_page_cap")
     headers = ("服务名称", "备案编号", "应用名称", "上线编号", "序号", "属地")
     text_bytes = 0
     counts = []
-    for page in reader.pages:
+    physical_rows = (24, 25, 24, 23)
+    if len(reader.pages) != len(physical_rows):
+        raise CaptureError("roster_page_count")
+    serials = [[], []]
+    for index, page in enumerate(reader.pages):
         plain, layout = (page.extract_text(extraction_mode=mode) or "" for mode in ("plain", "layout"))
         text_bytes += len(plain.encode("utf-8")) + len(layout.encode("utf-8"))
         if text_bytes > 3 * 1024 * 1024:
@@ -564,6 +603,11 @@ def measure_roster(reader):
         xs, ys, lines, operations, diagnostics = annex_coordinates(page)
         positioned = [block for block in operations if block["text"].strip()]
         coordinate_inventory = Counter(compact("".join(block["text"] for block in positioned)))
+        before, rows, after, crossings = roster_page((xs, ys, lines, operations, diagnostics), physical_rows[index])
+        data_rows = rows[1:] if index in {0, 2} else rows
+        serials[index // 2].extend(compact(row[0]) for row in data_rows)
+        row_order = compact(before + "".join(cell for row in rows for cell in row) + after)
+        flat_column_widths = [len(cell) for cell in rows[0]] if index in {0, 2} else []
         horizontal_lengths = Counter(round(abs(x2 - x1), 1) for kind, x1, _, x2, _ in lines if kind == "h")
         vertical_lengths = Counter(round(abs(y2 - y1), 1) for kind, _, y1, _, y2 in lines if kind == "v")
         origins = Counter(round(float(block["tx"]), 1) for block in positioned)
@@ -572,12 +616,20 @@ def measure_roster(reader):
                        "replacement_characters": ordered.count("\ufffd") + visual.count("\ufffd"),
                        "header_matches": [header in visual for header in headers],
                        "coordinate_inventory_matches": coordinate_inventory == Counter(ordered),
+                       "row_inventory_matches": Counter(row_order) == coordinate_inventory,
+                       "row_order_matches_stream": row_order == ordered,
+                       "row_order_matches_layout": row_order == visual,
+                       "all_cells_present": all(cell for row in rows for cell in row),
+                       "data_rows": len(data_rows), "header_lengths": flat_column_widths,
+                       "advance_crossings": crossings, "outside_characters": len(compact(before + after)),
                        "grid": {**diagnostics, "x_boundary_count": len(xs), "y_boundary_count": len(ys),
                                 "x_boundaries": xs[:16], "y_boundaries": ys[:40],
                                 "horizontal_lengths": horizontal_lengths.most_common(12),
                                 "vertical_lengths": vertical_lengths.most_common(12),
                                 "common_text_origins": origins.most_common(12)}})
-    return {"status": "roster_measured", "pages": len(counts), "page_diagnostics": counts}
+    return {"status": "roster_measured", "pages": len(counts), "page_diagnostics": counts,
+            "sequential_tables": [values == [str(i) for i in range(1, total + 1)]
+                                  for values, total in zip(serials, (48, 46), strict=True)]}
 
 
 def extract(case, quarantine, output=None):
