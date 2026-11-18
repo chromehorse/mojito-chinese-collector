@@ -17,6 +17,13 @@ from urllib.parse import urljoin, urlsplit
 
 
 CASES = {
+    "ndrc_plan_2026": {
+        "parent": "https://www.ndrc.gov.cn/fggz/fzzlgh/gjfzgh/",
+        "pdf": "https://www.ndrc.gov.cn/fggz/fzzlgh/gjfzgh/202603/U020260317369114704096.pdf",
+        "title": "国家发展战略和规划",
+        "title_selector": "title",
+        "probe_only": True,
+    },
     "cac_filing_2026_feb": {
         "parent": "https://www.cac.gov.cn/2024-04/02/c_1713729983803145.htm",
         "pdf": ("https://www.cac.gov.cn/cms/pub/interact/downloadfile.jsp?filepath=NUtqEIwGiCjGm2Bhl20cvLGupl4aHWqlv5jFDErUO79vz0vHSSJ6sATU6DtmcGo1YoYJDltyJqpCTDRSAKq6GlAfqphfFn00jUfFRLdBE5I="
@@ -181,7 +188,7 @@ def fetch(case, quarantine):
             title_node = tree.css_first(f'meta[name="{metadata_title}"]')
             title = title_node.attributes.get("content", "") if title_node else ""
         else:
-            title = first_text(tree, "#con_title, h1") or ""
+            title = first_text(tree, case.get("title_selector", "#con_title, h1")) or ""
         if roster_month is not None:
             from route_probe import CAC_ROSTER_INDEX, MEDIA_TYPE, cac_roster_links
 
@@ -741,6 +748,20 @@ def extract(case, quarantine, output=None):
         reader = PdfReader(stream, strict=True)
         if reader.is_encrypted:
             raise CaptureError("encrypted_pdf")
+        if case.get("probe_only"):
+            if output is not None or not 1 <= len(reader.pages) <= 250:
+                raise CaptureError("inspection_not_capture")
+            samples = []
+            for number in sorted({0, min(9, len(reader.pages) - 1), len(reader.pages) // 2, len(reader.pages) - 1}):
+                page = reader.pages[number]
+                plain = page.extract_text(extraction_mode="plain") or ""
+                layout = page.extract_text(extraction_mode="layout") or ""
+                samples.append({"page": number + 1, "plain_characters": len(plain), "layout_characters": len(layout),
+                                "same_character_inventory": Counter(compact(plain)) == Counter(compact(layout)),
+                                "chinese_characters": len(re.findall(r"[\u3400-\u9fff]", plain)),
+                                "replacement_characters": plain.count("\ufffd") + layout.count("\ufffd")})
+            return {"status": "attachment_measured", "pages": len(reader.pages), "samples": samples,
+                    "attachment_sha256": sha256(path.read_bytes()).hexdigest()}
         if "roster_month" in case:
             measurement, paragraphs, spans = read_roster(case, reader)
             staged = {}
