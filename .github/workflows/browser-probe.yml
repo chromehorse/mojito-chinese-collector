@@ -24,14 +24,15 @@ jobs:
           git init -q
           git fetch -q --depth=1 "https://github.com/$GITHUB_REPOSITORY.git" "$GITHUB_SHA"
           git checkout -q --detach FETCH_HEAD
-      - name: Build the existing Playwright container route
-        run: docker build -f Dockerfile.browser -t mojito-browser-collector .
+      - name: Prepare the pinned renderer on the disposable VM
+        run: |
+          python3 -m venv "$RUNNER_TEMP/browser-runtime"
+          "$RUNNER_TEMP/browser-runtime/bin/python" -m pip install --only-binary=:all: -r requirements.txt playwright==1.64.1
       - name: Test one approved publisher with the Chromium sandbox enabled
         env:
           RECIPE: ${{ inputs.recipe }}
         run: |
-          timeout --signal=TERM 300s docker run --rm --init --read-only --cap-drop=ALL \
-            --security-opt=no-new-privileges --security-opt "seccomp=$GITHUB_WORKSPACE/browser-seccomp.json" \
-            --memory=1536m --pids-limit=160 --tmpfs /tmp:rw,nosuid,nodev,noexec,size=512m \
-            --tmpfs /data:rw,nosuid,nodev,noexec,size=32m,mode=1777 \
-            -e HOME=/tmp mojito-browser-collector "$RECIPE"
+          install -d -m 700 "$RUNNER_TEMP/browser-home" "$RUNNER_TEMP/browser-state"
+          timeout --signal=TERM 300s env -i HOME="$RUNNER_TEMP/browser-home" PATH=/usr/bin:/bin \
+            LANG=C.UTF-8 COLLECTOR_BROWSER=chrome \
+            "$RUNNER_TEMP/browser-runtime/bin/python" -B browser_capture.py "$RECIPE" "$RUNNER_TEMP/browser-state/output"

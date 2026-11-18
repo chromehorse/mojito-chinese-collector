@@ -40,3 +40,13 @@ jobs:
             --tmpfs /tmp:rw,nosuid,nodev,noexec,size=32m \
             --mount "type=bind,source=$GITHUB_WORKSPACE/route_probe.py,destination=/collector/route_probe.py,readonly" \
             --entrypoint python mojito-chinese-collector -B /collector/route_probe.py "$PUBLISHER"
+      - name: Check both e-paper columns through normal normalization
+        if: matrix.source == 'people'
+        run: |
+          timeout --signal=TERM 300s docker run --rm --read-only --cap-drop=ALL \
+            --security-opt=no-new-privileges --memory=1024m --pids-limit=64 \
+            --tmpfs /data:rw,nosuid,nodev,noexec,size=32m,mode=1777 \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,size=32m \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/pd_epaper.py,destination=/collector/pd_epaper.py,readonly" \
+            --entrypoint python mojito-chinese-collector -B /collector/pd_epaper.py \
+            --verify-controls 2026-11-17 2026-09-16

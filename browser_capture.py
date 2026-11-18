@@ -55,7 +55,7 @@ def capture(entry, output):
         blocked_hosts, requests, received = set(), 0, 0
         with httpx.Client(trust_env=False, follow_redirects=False, timeout=12,
                           headers={"User-Agent": USER_AGENT}) as client, sync_playwright() as playwright:
-            browser = playwright.chromium.launch(chromium_sandbox=True,
+            browser = playwright.chromium.launch(chromium_sandbox=True, channel=os.environ.get("COLLECTOR_BROWSER"),
                                                  args=["--disable-dev-shm-usage", "--disable-background-networking"])
             context = browser.new_context(accept_downloads=False, service_workers="block", user_agent=USER_AGENT)
             context.route_web_socket("**/*", lambda ws: ws.close())
@@ -162,7 +162,7 @@ def main():
         recipe = next(entry for entry in load_registry()
                       if entry["id"] == sys.argv[1] and entry["status"] == "requires-js")
         with open(os.devnull, "w") as sink, redirect_stdout(sink), redirect_stderr(sink):
-            result = capture(recipe, Path("/data/output"))
+            result = capture(recipe, Path(sys.argv[2]) if len(sys.argv) > 2 else Path("/data/output"))
         print(json.dumps(result))
     except Exception as error:
         # Never emit browser request URLs, page content, or tracebacks to a public workflow.
