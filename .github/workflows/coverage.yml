@@ -1,0 +1,83 @@
+name: Chinese source coverage
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  plan:
+    if: >-
+      github.repository == 'chromehorse/mojito-chinese-collector' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.sources.outputs.matrix }}
+    steps:
+      - name: Retrieve trusted collector code
+        run: |
+          git init -q
+          git fetch -q --depth=1 "https://github.com/$GITHUB_REPOSITORY.git" "$GITHUB_SHA"
+          git checkout -q --detach FETCH_HEAD
+      - name: Group active sources by publisher
+        id: sources
+        run: |
+          python3 -B - <<'PY'
+          from collections import defaultdict
+          import json
+          import os
+          from pathlib import Path
+          import re
+
+          groups = defaultdict(list)
+          rows = json.loads(Path('_sources.json').read_text(encoding='utf-8'))
+          for row in rows:
+              recipe = row['id']
+              if not re.fullmatch(r'[a-z0-9_-]+', recipe):
+                  raise ValueError('Invalid source recipe ID')
+              if row['status'] == 'active':
+                  groups[row['allowed_domains'][0].removeprefix('www.')].append(recipe)
+              else:
+                  print(json.dumps({'recipe': recipe, 'status': 'deferred'}))
+          matrix = {'include': [{'name': names[0], 'recipes': ' '.join(names)} for names in groups.values()]}
+          with Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as output:
+              output.write('matrix=' + json.dumps(matrix, separators=(',', ':')) + '\n')
+          PY
+
+  coverage:
+    name: ${{ matrix.name }}
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - name: Retrieve trusted collector code
+        run: |
+          git init -q
+          git fetch -q --depth=1 "https://github.com/$GITHUB_REPOSITORY.git" "$GITHUB_SHA"
+          git checkout -q --detach FETCH_HEAD
+      - name: Prepare the unprivileged collector container
+        run: docker build -t mojito-chinese-collector .
+      - name: Test bounded article discovery and parsing
+        env:
+          RECIPES: ${{ matrix.recipes }}
+        run: |
+          read -ra recipes <<< "$RECIPES"
+          for recipe in "${recipes[@]}"; do
+            state="$RUNNER_TEMP/source-$recipe"
+            install -d -m 700 "$state"
+            printf 'Recipe %s\n' "$recipe"
+            if timeout --signal=TERM 180s docker run --rm --read-only --cap-drop=ALL \
+                --security-opt=no-new-privileges --memory=1024m --pids-limit=64 \
+                --user "$(id -u):$(id -g)" --tmpfs /tmp:rw,nosuid,nodev,noexec,size=32m \
+                --mount "type=bind,source=$state,destination=/data" \
+                mojito-chinese-collector collect --data /data --summary-only --cap 2 --recipe "$recipe"; then
+              printf 'Recipe exit 0\n'
+            else
+              printf 'Recipe exit %d\n' "$?"
+            fi
+          done
