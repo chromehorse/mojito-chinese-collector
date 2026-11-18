@@ -99,14 +99,28 @@ def complete_paper_byline(current, incoming):
     return (header + separator + old_body).encode("utf-8")
 
 
-def merge_batch(incoming, repository):
+def completed_capture(current, incoming):
+    old_header, separator, old_body = current.decode("utf-8").replace("\r\n", "\n").partition("\n---\n")
+    new_header, new_separator, new_body = incoming.decode("utf-8").replace("\r\n", "\n").partition("\n---\n")
+    if (not separator or not new_separator or old_body != new_body
+            or old_header.splitlines().count("body_complete: false") != 1
+            or new_header.splitlines().count("body_complete: true") != 1):
+        return False
+    varying = ("body_complete:", "fetched:")
+    return ([line for line in old_header.splitlines() if not line.startswith(varying)]
+            == [line for line in new_header.splitlines() if not line.startswith(varying)])
+
+
+def merge_batch(incoming, repository, *, include_incomplete=False):
     """Retain distinct editions and return the exact paths for one commit."""
     path = repository / MANIFEST
     existing = decode_manifest(bounded_read(path)) if path.exists() else {}
     current_urls = {row["canonical_url"] for row in existing.values()}
     added = []
     for rid, row in decode_manifest(bounded_read(incoming / MANIFEST)).items():
-        if row.get("body_complete") is not True or row.get("republication_of"):
+        if (row.get("body_complete") is not True
+                and not (include_incomplete and row.get("body_complete") is False)
+                or row.get("republication_of")):
             continue
         relative = f"{NORMALIZED}/{rid}.md"
         data = bounded_read(incoming / relative)
@@ -115,6 +129,13 @@ def merge_batch(incoming, repository):
         if rid in existing:
             if any(row[key] != existing[rid][key] for key in ("canonical_url", "content_hash")):
                 raise ValueError("A recorded edition identifier has a conflicting binding.")
+            if existing[rid].get("body_complete") is False and row.get("body_complete") is True:
+                if not completed_capture(bounded_read(target), data):
+                    raise ValueError("Completing an edition cannot change its text or fixed metadata.")
+                target.write_bytes(data)
+                existing[rid] = row
+                added.append(relative)
+                continue
             if row["source"] == "pd_epaper" and (corrected := complete_paper_byline(bounded_read(target), data)):
                 target.write_bytes(corrected)
                 added.append(relative)
@@ -230,6 +251,8 @@ def pull_snapshot(repository, token, staging, *, ssh_config=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("operation", choices=("check-write", "push", "pull"))
+    parser.add_argument("--include-incomplete", action="store_true",
+                        help="Retain explicitly incomplete converted text for private inspection; it remains ineligible for import.")
     parser.add_argument("--repository", required=True)
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--ssh-config", type=Path, help="local read-only deploy key configuration, pull only")
@@ -256,7 +279,7 @@ def main():
                     count = 0
                 else:
                     phase = "validate_batch"
-                    changed = merge_batch(directory, repository)
+                    changed = merge_batch(directory, repository, include_incomplete=args.include_incomplete)
                     if changed:
                         phase = "commit"
                         git(["add", "--", MANIFEST, *changed], cwd=repository)

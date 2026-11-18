@@ -34,6 +34,13 @@ CASES = {
         "pdf_sha256": "29b3c70720b1faff458a123cb29672ee2ee8874a53b6d4a91f402a73f6945027",
         "pages": 140,
         "inspect_all_pages": True,
+        "inspection_capture": True,
+        "record_title": "中华人民共和国国民经济和社会发展第十五个五年规划纲要",
+        "source": "ndrc_national_plans",
+        "source_genre": "decree",
+        "date": "2026-03-17",
+        "document_number": None,
+        "publisher": None,
         "probe_only": True,
     },
     "cac_filing_2026_feb": {
@@ -617,7 +624,8 @@ def normalize_shanghai(case, cleaned, counts, coordinates, prose):
     return paragraphs, spans, diagnostics
 
 
-def write_capture(case, path, output, paragraphs, spans):
+def write_capture(case, path, output, paragraphs, spans, *, body_complete=True):
+    from chinese_collector import edition_snapshot
     from run import load_manifest, save_manifest
     from scraper.fetcher import utcnow
     from scraper.normalize import build_record, to_markdown
@@ -627,7 +635,9 @@ def write_capture(case, path, output, paragraphs, spans):
     meta, text = build_record({"title": case.get("record_title", case["title"]), "date": case["date"],
                                "body_paragraphs": paragraphs, "document_number": case["document_number"],
                                "issuing_institution": case["publisher"]},
-                              entry, case["pdf"], utcnow().isoformat())
+                              entry, case["pdf"], utcnow().isoformat(), body_complete=body_complete)
+    if snapshot := edition_snapshot({"url": case["pdf"], "archive_timestamp": case.get("archive_timestamp")}):
+        meta["archive_snapshot"] = snapshot
     meta.update(source_genre=case["source_genre"], attachment_parent=case["parent"],
                 attachment_sha256=sha256(path.read_bytes()).hexdigest(),
                 pdf_page_count=case["pages"], pdf_page_spans=",".join(f"{start}-{end}" for start, end in spans))
@@ -792,7 +802,7 @@ def boundary_folios(text):
             if lines and re.fullmatch(r"[0-9IVXLCDMⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+", lines[index])]
 
 
-def inspect_attachment(case, reader, path):
+def inspect_attachment(case, reader, path, output=None):
     if not 1 <= len(reader.pages) <= 250 or case.get("pages", len(reader.pages)) != len(reader.pages):
         raise CaptureError("unexpected_page_count")
     all_pages = case.get("inspect_all_pages")
@@ -839,10 +849,23 @@ def inspect_attachment(case, reader, path):
                                    rotated_layout_order_matches=compact(plain) == compact(rotated))
         text.append(page_text)
         measurements.append(measurement)
+    staged = {}
+    if output is not None:
+        if (not case.get("inspection_capture") or other is None
+                or not all(row["independent_inventory_matches"] for row in measurements)
+                or compact(case["record_title"]) not in compact(other[0])):
+            raise CaptureError("incomplete_text_not_verified")
+        paragraphs, spans = [], []
+        for number, page in enumerate(other, 1):
+            lines = [line.strip() for line in page.splitlines() if line.strip()]
+            paragraphs.extend(lines)
+            spans.extend([(number, number)] * len(lines))
+        meta = write_capture(case, path, output, paragraphs, spans, body_complete=False)
+        staged = {"staged": 1, "body_complete": False, "paragraphs": len(paragraphs), "content_hash": meta["content_hash"]}
     return {"status": "attachment_measured", "pages": len(reader.pages), "samples": measurements,
             "column_labels": dict(Counter(label for page in text for label in re.findall(r"专栏(\d+)", page))),
             "figure_labels": dict(Counter(label for page in text for label in re.findall(r"图(\d+)", page))),
-            "attachment_sha256": sha256(path.read_bytes()).hexdigest()}
+            "attachment_sha256": sha256(path.read_bytes()).hexdigest(), **staged}
 
 
 def extract(case, quarantine, output=None):
@@ -856,9 +879,9 @@ def extract(case, quarantine, output=None):
         if reader.is_encrypted:
             raise CaptureError("encrypted_pdf")
         if case.get("probe_only"):
-            if output is not None:
+            if output is not None and not case.get("inspection_capture"):
                 raise CaptureError("inspection_not_capture")
-            return inspect_attachment(case, reader, path)
+            return inspect_attachment(case, reader, path, output)
         if "roster_month" in case:
             measurement, paragraphs, spans = read_roster(case, reader)
             staged = {}

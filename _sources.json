@@ -723,5 +723,35 @@
     "recipe": {
       "strict_html": {}
     }
+  },
+  {
+    "id": "ndrc_national_plans",
+    "name": "国家发展和改革委员会 National Development and Reform Commission national plans",
+    "kind": "listing",
+    "list_url": "https://www.ndrc.gov.cn/fggz/fzzlgh/gjfzgh/",
+    "allowed_domains": [
+      "www.ndrc.gov.cn"
+    ],
+    "country": "CN",
+    "language": "zh",
+    "corpus": "government",
+    "authority_level": "central-doctrinal",
+    "source_genre_default": "decree",
+    "independence_cluster": "state-council",
+    "cadence_days": 30,
+    "backfill_cap": 1,
+    "status": "blocked",
+    "status_evidence": "The local issuer index could not verify crawl policy. The exact archived PDF is available; table and figure fidelity checks remain pending.",
+    "recipe": {
+      "strict_html": {},
+      "historical_editions": {
+        "plan_2026": {
+          "url": "https://www.ndrc.gov.cn/fggz/fzzlgh/gjfzgh/202603/U020260317369114704096.pdf",
+          "published": "2026-03-17",
+          "archive_timestamp": "20260324133111",
+          "title_text": "中华人民共和国国民经济和社会发展第十五个五年规划纲要"
+        }
+      }
+    }
   }
 ]
