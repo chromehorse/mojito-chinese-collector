@@ -8,7 +8,6 @@ import json
 import os
 from pathlib import Path
 import re
-from tempfile import TemporaryDirectory
 from traceback import extract_tb
 import unicodedata
 from urllib.parse import urljoin, urlsplit
@@ -145,6 +144,8 @@ def inspect_dashed_folios(text_by_mode):
 
 
 def inspect_annex_grid(page):
+    from pypdf._text_extraction._layout_mode import text_show_operations
+
     lines = set()
     horizontal, vertical = set(), set()
     operators = Counter()
@@ -178,12 +179,12 @@ def inspect_annex_grid(page):
             previous = None
 
     page.extract_text(visitor_operand_before=inspect)
-    with TemporaryDirectory(prefix="pdf-annex-layout-") as directory:
-        path = Path(directory)
-        page.extract_text(extraction_mode="layout", layout_mode_debug_path=path)
-        blocks = json.loads((path / "bts.json").read_text(encoding="utf-8"))
-        groups = json.loads((path / "tjs.json").read_text(encoding="utf-8"))
-        operations = [entry for group in groups for entry in (group if isinstance(group, list) else [group])]
+    contents = page.get_contents()
+    if contents is None:
+        raise CaptureError("annex_content_missing")
+    # This uses the pinned layout extractor's in-memory blocks. Its optional
+    # debug export cannot serialize this document's font resources.
+    blocks = text_show_operations(iter(contents.operations), page._layout_mode_fonts(), True)
     labels = ("专题", "方向名称", "支持内容", "联系人", "支持制造业企业",
               "面向“AI+制造”重点领域", "支持工业互联网平台企业", "AI+制造：")
     positions = [[(round(block["tx"], 1), round(block["ty"], 1)) for block in blocks
@@ -191,7 +192,6 @@ def inspect_annex_grid(page):
     return {"horizontal_edges": sorted(horizontal), "vertical_edges": sorted(vertical),
             "line_segments": len(lines), "path_operators": dict(operators),
             "block_count": len(blocks), "block_fields": sorted(blocks[0]) if blocks else [],
-            "text_operators": len(operations), "text_fields": sorted(operations[0]) if operations else [],
             "anchors_xy": positions}
 
 
