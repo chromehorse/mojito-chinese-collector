@@ -113,8 +113,12 @@ def main():
     args = parser.parse_args()
     now = datetime.now(timezone(timedelta(hours=8))).date()
     dates = args.issues or [now, now - timedelta(days=1)]
-    with open(os.devnull, "w") as sink, redirect_stdout(sink), redirect_stderr(sink):
-        result = collect(Path("/data/output"), dates, verify_controls=args.verify_controls)
+    try:
+        with open(os.devnull, "w") as sink, redirect_stdout(sink), redirect_stderr(sink):
+            result = collect(Path("/data/output"), dates, verify_controls=args.verify_controls)
+    except Exception as error:
+        print(json.dumps({"status": "epaper_failed", "error_type": type(error).__name__}))
+        return 1
     print(json.dumps(result))
     return int(result["status"] != "ok")
 

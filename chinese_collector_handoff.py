@@ -251,9 +251,9 @@ def main():
     except HTTPError as error:
         print(json.dumps({"status": "handoff_failed", "phase": phase, "http_status": error.code}))
         return 1
-    except Exception:
+    except Exception as error:
         # This command can run in a public workflow. Keep paths, URLs and credentials out of logs.
-        print(json.dumps({"status": "handoff_failed", "phase": phase}))
+        print(json.dumps({"status": "handoff_failed", "phase": phase, "error_type": type(error).__name__}))
         return 1
 
 

@@ -147,7 +147,10 @@ def capture(entry, output):
                 summary["written"] += 1
                 summary["abstracts"] += int(not complete)
             if summary["written"]:
-                save_manifest(manifest, output / "manifest.json")
+                manifest_path = output / "manifest.json"
+                save_manifest(manifest, manifest_path)
+                # The parent stays private until the renderer exits and the uploader owns it.
+                manifest_path.chmod(0o644)
             if not summary["parsed"]:
                 summary["status"] = "abstract_listing_only" if summary["inline_papers"] else "no_validated_article"
             context.close()
@@ -158,6 +161,7 @@ def capture(entry, output):
 
 
 def main():
+    os.umask(0o022)
     try:
         recipe = next(entry for entry in load_registry()
                       if entry["id"] == sys.argv[1] and entry["status"] == "requires-js")

@@ -15,6 +15,10 @@ on:
       recipes:
         description: Comma-separated recipe IDs that failed the regular local scraper
         type: string
+      verify_epaper:
+        description: Use two fixed public e-paper editions for an end-to-end test
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -59,6 +63,7 @@ jobs:
         continue-on-error: true
         env:
           FALLBACK_RECIPES: ${{ inputs.recipes }}
+          VERIFY_EPAPER: ${{ inputs.verify_epaper }}
         run: |
           if [[ ! "$FALLBACK_RECIPES" =~ ^[a-z0-9_-]+(,[a-z0-9_-]+)*$ ]]; then
             printf '{"status":"missing_or_invalid_recipes"}\n'
@@ -66,13 +71,31 @@ jobs:
           fi
           IFS=, read -ra recipes <<< "$FALLBACK_RECIPES"
           selected=()
-          for recipe in "${recipes[@]}"; do selected+=(--recipe "$recipe"); done
+          epaper=false
+          for recipe in "${recipes[@]}"; do
+            case "$recipe" in
+              pd_commentary|pd_zhongsheng) epaper=true ;;
+              *) selected+=(--recipe "$recipe") ;;
+            esac
+          done
           install -d -m 700 "$RUNNER_TEMP/collector-state"
-          docker run --rm --read-only --cap-drop=ALL --security-opt=no-new-privileges \
+          container=(--rm --read-only --cap-drop=ALL --security-opt=no-new-privileges
             --memory=1024m --pids-limit=64 --user "$(id -u):$(id -g)" \
             --tmpfs /tmp:rw,nosuid,nodev,noexec,size=32m \
-            --mount "type=bind,source=$RUNNER_TEMP/collector-state,destination=/data" \
-            mojito-chinese-collector collect --data /data --summary-only --cap 4 "${selected[@]}"
+            --mount "type=bind,source=$RUNNER_TEMP/collector-state,destination=/data")
+          result=0
+          if ((${#selected[@]})); then
+            docker run "${container[@]}" mojito-chinese-collector collect --data /data \
+              --summary-only --cap 4 "${selected[@]}" || result=$?
+          fi
+          if "$epaper"; then
+            dates=()
+            if [ "$VERIFY_EPAPER" = true ]; then dates=(--verify-controls 2026-11-17 2026-09-16); fi
+            docker run "${container[@]}" \
+              --mount "type=bind,source=$GITHUB_WORKSPACE/pd_epaper.py,destination=/collector/pd_epaper.py,readonly" \
+              --entrypoint python mojito-chinese-collector -B /collector/pd_epaper.py "${dates[@]}" || result=$?
+          fi
+          exit "$result"
 
       - name: Send text to the private intake repo
         if: ${{ !cancelled() && (inputs.publish_private || inputs.verify_access) }}
