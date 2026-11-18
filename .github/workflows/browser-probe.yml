@@ -21,7 +21,7 @@ jobs:
       github.repository == 'chromehorse/mojito-chinese-collector' &&
       github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-22.04
-    timeout-minutes: 12
+    timeout-minutes: 18
     environment: private-intake
     concurrency:
       group: collector-intake
@@ -52,7 +52,7 @@ jobs:
         run: |
           base=/var/tmp/mojito-browser
           capture_status=0
-          sudo -u mojito-browser timeout --signal=TERM 300s env -i HOME="$base/home" PATH=/usr/bin:/bin \
+          sudo -u mojito-browser timeout --signal=TERM 600s env -i HOME="$base/home" PATH=/usr/bin:/bin \
             LANG=C.UTF-8 COLLECTOR_BROWSER=chrome \
             "$base/runtime/bin/python" -B "$base/code/browser_capture.py" "$RECIPE" "$base/files/output" \
             || capture_status=$?
@@ -60,7 +60,7 @@ jobs:
           sudo chown -h "$(id -u):$(id -g)" "$base/files"
           exit "$capture_status"
       - name: Hand off validated normalized text
-        if: ${{ !cancelled() && inputs.publish_private && steps.capture.outcome == 'success' }}
+        if: ${{ !cancelled() && inputs.publish_private && steps.capture.outcome != 'skipped' }}
         env:
           INTAKE_UPLOAD_TOKEN: ${{ secrets.INTAKE_UPLOAD_TOKEN }}
         run: |

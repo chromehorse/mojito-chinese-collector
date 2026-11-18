@@ -28,8 +28,8 @@ RESOURCE_TYPES = {
 ARTICLE_PATH = r"/portal/journal/portal/client/paper/[0-9a-f]+(?:[?#].*)?$"
 GOV_LATEST = "https://www.gov.cn/zhengce/zuixin/"
 AI_POLICY_TERMS = ("人工智能", "大模型", "智能体", "具身智能", "智能算力", "算法推荐", "深度合成")
-MAX_BROWSER_REQUESTS = 72
-MAX_BROWSER_BYTES = 25 * 1024 * 1024
+MAX_BROWSER_REQUESTS = 512
+MAX_BROWSER_BYTES = 100 * 1024 * 1024
 
 
 def exact_origin(url, domains):
@@ -125,8 +125,13 @@ def capture(entry, output):
                 return {**summary, "status": "listing_oversize"}
             summary["inline_papers"] = len(clean_tree(listing_html).css("div.paperBox"))
             pattern = recipe.get("article_url_pattern") or ARTICLE_PATH
-            urls = [url for url in extract_links(listing_html, listing, "a", domains, pattern)
-                    if exact_origin(url, domains)][:2]
+            candidates = [url for url in extract_links(listing_html, listing, "a", domains, pattern)
+                          if exact_origin(url, domains)]
+            cap = min(entry["backfill_cap"], 30)
+            urls = candidates[:cap]
+            summary["listing_candidates"] = len(candidates)
+            summary["article_cap"] = cap
+            summary["listing_truncated"] = len(candidates) > cap
             summary["discovered"] = len(urls)
             manifest = load_manifest(output / "manifest.json")
             for url in urls:
@@ -165,6 +170,8 @@ def capture(entry, output):
                 manifest_path.chmod(0o644)
             if not summary["parsed"]:
                 summary["status"] = "abstract_listing_only" if summary["inline_papers"] else "no_validated_article"
+            elif summary["parse_failures"] or summary["blocked_http"]:
+                summary["status"] = "partial_capture"
             context.close()
             browser.close()
     finally:

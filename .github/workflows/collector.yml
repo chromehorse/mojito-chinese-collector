@@ -48,7 +48,7 @@ jobs:
       github.repository == 'chromehorse/mojito-chinese-collector' &&
       github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 45
     concurrency:
       group: collector-intake
       cancel-in-progress: false
@@ -104,7 +104,7 @@ jobs:
           result=0
           if ((${#selected[@]})); then
             docker run "${container[@]}" mojito-chinese-collector collect --data /data \
-              --summary-only --cap 4 "${selected[@]}" || result=$?
+              --summary-only "${selected[@]}" || result=$?
           fi
           if "$epaper"; then
             dates=()
