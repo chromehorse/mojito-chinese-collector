@@ -1,0 +1,53 @@
+name: Isolated publisher PDF test
+
+on:
+  workflow_dispatch:
+    inputs:
+      edition:
+        description: Exact publisher attachment for the collector test
+        type: choice
+        options: [tc260_005, miit_ethics_control]
+        default: tc260_005
+
+permissions: {}
+
+jobs:
+  capture:
+    if: >-
+      github.repository == 'chromehorse/mojito-chinese-collector' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Retrieve trusted code
+        run: |
+          git init -q
+          git fetch -q --depth=1 "https://github.com/$GITHUB_REPOSITORY.git" "$GITHUB_SHA"
+          git checkout -q --detach FETCH_HEAD
+      - name: Prepare the text collector and offline parser
+        run: |
+          docker build -t mojito-chinese-collector .
+          docker build -f Dockerfile.pdf -t mojito-chinese-pdf .
+      - name: Verify the linked attachment in disposable quarantine
+        env:
+          EDITION: ${{ inputs.edition }}
+        run: |
+          install -d -m 700 "$RUNNER_TEMP/mojito-pdf-quarantine"
+          timeout --signal=TERM 120s docker run --rm --read-only --cap-drop=ALL \
+            --security-opt=no-new-privileges --user "$(id -u):$(id -g)" \
+            --memory=256m --pids-limit=24 --ulimit fsize=41943040:41943040 \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/pdf_capture.py,destination=/collector/pdf_capture.py,readonly" \
+            --mount "type=bind,source=$RUNNER_TEMP/mojito-pdf-quarantine,destination=/quarantine" \
+            --entrypoint python mojito-chinese-collector -B /collector/pdf_capture.py fetch "$EDITION" /quarantine
+      - name: Measure text extraction without network access
+        env:
+          EDITION: ${{ inputs.edition }}
+        run: |
+          timeout --signal=TERM 180s docker run --rm --network=none --read-only --cap-drop=ALL \
+            --security-opt=no-new-privileges --user "$(id -u):$(id -g)" \
+            --cpus=1 --memory=384m --memory-swap=384m --pids-limit=24 \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,size=8m \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/pdf_capture.py,destination=/collector/pdf_capture.py,readonly" \
+            --mount "type=bind,source=$RUNNER_TEMP/mojito-pdf-quarantine,destination=/quarantine,readonly" \
+            --entrypoint python mojito-chinese-pdf -B /collector/pdf_capture.py extract "$EDITION" /quarantine
