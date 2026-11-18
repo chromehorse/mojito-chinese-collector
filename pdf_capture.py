@@ -1,9 +1,11 @@
 """Verify a registered publisher attachment and extract its text on a disposable VM."""
 
 import argparse
+from bisect import bisect_left, bisect_right
 from collections import Counter
 from contextlib import redirect_stderr, redirect_stdout
 from hashlib import sha256
+from itertools import accumulate
 import json
 from math import isfinite
 import os
@@ -59,6 +61,10 @@ CASES = {
         "dashed_folios": True,
         "annex_page": 5,
         "annex_title": "2026年上海市制造业智能化发展项目指南",
+        "prose_selector": ".text-main",
+        "prose_count": 33,
+        "annex_intro": "附件：2026年上海市制造业智能化发展支持方向",
+        "footer": ("上海市经济和信息化委员会办公室", "2026年1月12日印发"),
         "anchors": {
             1: "2026年1月10日",
             2: "支持“AI+制造”样板企业梯度培育",
@@ -79,7 +85,7 @@ class CaptureError(ValueError):
 def fetch(case, quarantine):
     import httpx
     from chinese_collector import miit_pdf_links
-    from scraper.adapters._common import clean_tree, collect_attachment_links, first_text
+    from scraper.adapters._common import clean_tree, collect_attachment_links, complete_body_paragraphs, first_text
     from scraper.config import MAX_PDF_BYTES
     from scraper.fetcher import Fetcher
 
@@ -111,6 +117,13 @@ def fetch(case, quarantine):
                                if line.strip() in {url, url.removeprefix("https:")})
         if case["title"] not in title or url not in attachments:
             raise CaptureError("publisher_link_not_verified")
+        if selector := case.get("prose_selector"):
+            paragraphs = complete_body_paragraphs(tree, selector)
+            markers = [i for i, text in enumerate(paragraphs) if compact(text) == case["annex_intro"]]
+            if markers != [case["prose_count"] - 1]:
+                raise CaptureError("publisher_prose_boundary_not_verified")
+            (quarantine / "parent-paragraphs.json").write_text(
+                json.dumps(paragraphs[:case["prose_count"]], ensure_ascii=False), encoding="utf-8")
         if not fetcher._robots_allows(url):
             raise CaptureError("attachment_crawl_policy")
         fetcher._polite_wait(url)
@@ -413,10 +426,10 @@ def shanghai_annex(case, coordinates, plain, layout):
                         "advance_crossings": advance_crossings}
 
 
-def compose_paragraphs(case, layout, annex=None):
+def compose_paragraphs(case, layout):
     paragraphs, spans = [], []
     for number, page in enumerate(layout, 1):
-        blocks = annex if annex is not None and number == case["annex_page"] else page_blocks(page)
+        blocks = page_blocks(page)
         if not blocks:
             raise CaptureError("empty_page")
         if phrase := case["cross_page"].get(number - 1):
@@ -443,7 +456,7 @@ def normalize(case, modes):
     return paragraphs, spans
 
 
-def normalize_shanghai(case, cleaned, counts, coordinates):
+def normalize_shanghai(case, cleaned, counts, coordinates, prose):
     plain, layout = cleaned["plain"], cleaned["layout"]
     annex_index = case["annex_page"] - 1
     if any(count != 1 for per_mode in counts.values() for count in per_mode):
@@ -451,14 +464,33 @@ def normalize_shanghai(case, cleaned, counts, coordinates):
     if any(compact(a) != compact(b) for index, (a, b) in enumerate(zip(plain, layout, strict=True))
            if index != annex_index):
         raise CaptureError("text_order_disagrees")
-    if (compact(case["document_number"]) not in compact(plain[0])
-            or not compact(plain[-1]).endswith("2026年1月12日印发")):
+    if compact("".join(case["footer"])) != compact(plain[-1]):
         raise CaptureError("shanghai_edition_markers")
     annex, diagnostics = shanghai_annex(case, coordinates, plain[annex_index], layout[annex_index])
-    paragraphs, spans = compose_paragraphs(case, layout, annex)
-    expected = [*plain[:annex_index], "".join(annex), *plain[annex_index + 1:]]
-    if compact("".join(paragraphs)) != compact("".join(expected)):
-        raise CaptureError("normalized_text_not_verified")
+    if (not isinstance(prose, list) or len(prose) != case["prose_count"]
+            or not all(isinstance(text, str) and compact(text) for text in prose)
+            or compact(prose[-1]) != case["annex_intro"]):
+        raise CaptureError("publisher_prose_not_verified")
+    paragraphs = [case["opening"], case["document_number"], case["title"], *prose]
+    pages = list(map(compact, plain[:annex_index]))
+    body = "".join(pages)
+    page_ends = list(accumulate(map(len, pages)))
+    spans = []
+    offset = 0
+    for index, paragraph in enumerate(paragraphs, 1):
+        text = compact(paragraph)
+        if not body.startswith(text, offset):
+            difference = next((i for i, (a, b) in enumerate(zip(text, body[offset:])) if a != b), None)
+            raise CaptureError(f"publisher_prose_not_in_pdf paragraph={index} difference={difference}")
+        start = bisect_right(page_ends, offset) + 1
+        offset += len(text)
+        end = bisect_left(page_ends, offset) + 1
+        spans.append((start, end))
+    if offset != len(body) or [(start, end) for start, end in spans if start != end] != [(2, 3), (3, 4)]:
+        raise CaptureError("publisher_prose_page_spans")
+    paragraphs.extend([*annex, *case["footer"]])
+    spans.extend([(case["annex_page"], case["annex_page"])] * len(annex))
+    spans.extend([(case["pages"], case["pages"])] * len(case["footer"]))
     return paragraphs, spans, diagnostics
 
 
@@ -518,7 +550,10 @@ def extract(case, quarantine, output=None):
     if case.get("dashed_folios"):
         cleaned, counts = inspect_dashed_folios(text_by_mode)
         page_pairs = list(zip(cleaned["plain"], cleaned["layout"], strict=True))
-        paragraphs, spans, table_grid = normalize_shanghai(case, cleaned, counts, coordinates)
+        parent_text = (quarantine / "parent-paragraphs.json").read_bytes()
+        if len(parent_text) > 64 * 1024:
+            raise CaptureError("publisher_prose_size")
+        paragraphs, spans, table_grid = normalize_shanghai(case, cleaned, counts, coordinates, json.loads(parent_text))
         layout_diagnostics = {
             "folio_removals": counts,
             "page_modes_agree_without_folios": [compact(a) == compact(b) for a, b in page_pairs],
