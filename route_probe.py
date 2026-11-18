@@ -4,6 +4,7 @@ from contextlib import redirect_stderr, redirect_stdout
 import json
 import os
 from pathlib import Path
+import re
 import sys
 from urllib.parse import parse_qsl, urljoin, urlsplit
 
@@ -267,6 +268,9 @@ def probe_cac_rosters(fetcher):
                     continue
                 prefix = next(response.iter_raw(chunk_size=32), b"")
                 mime = response.headers.get("content-type", "").partition(";")[0].strip().lower()
+                row["mime"] = mime if re.fullmatch(r"[a-z0-9.+-]{1,32}/[a-z0-9.+-]{1,64}", mime) else "unrecognized"
+                disposition = response.headers.get("content-disposition", "").partition(";")[0].strip().lower()
+                row["disposition"] = disposition if disposition in {"attachment", "inline"} else "unspecified"
                 if prefix.startswith(b"%PDF-"):
                     row["format"] = "pdf"
                 elif prefix.startswith(b"PK\x03\x04"):
