@@ -166,7 +166,14 @@ def main():
         print(json.dumps(result))
     except Exception as error:
         # Never emit browser request URLs, page content, or tracebacks to a public workflow.
-        print(json.dumps({"status": "browser_failed", "error_type": type(error).__name__}))
+        detail = str(error).lower()
+        indicators = {label: any(word in detail for word in words) for label, words in {
+            "sandbox": ("no usable sandbox", "namespace sandbox", "sandbox_host_linux", "zygote"),
+            "permissions": ("operation not permitted", "permission denied"),
+            "writable_profile": ("read-only file system", "crashpad", "user data directory"),
+            "timeout": ("timeout", "timed out"),
+        }.items()}
+        print(json.dumps({"status": "browser_failed", "error_type": type(error).__name__, **indicators}))
         return 1
     return int(result["status"] != "ok")
 
