@@ -17,6 +17,11 @@ from urllib.parse import urljoin, urlsplit
 
 
 CASES = {
+    "cac_filing_2026_feb": {
+        "parent": "https://www.cac.gov.cn/2024-04/02/c_1713729983803145.htm",
+        "title": "国家互联网信息办公室关于发布生成式人工智能服务已备案信息的公告",
+        "roster_month": 2,
+    },
     "tc260_005": {
         "parent": "https://www.cac.gov.cn/2026-05/22/c_1781191242686496.htm",
         "pdf": "https://www.cac.gov.cn/rootimages/uploadimg/1781191242772713/1781191242772713.pdf",
@@ -89,12 +94,14 @@ def fetch(case, quarantine):
     from scraper.config import MAX_PDF_BYTES
     from scraper.fetcher import Fetcher
 
-    parent, url = case["parent"], case["pdf"]
+    parent, url = case["parent"], case.get("pdf")
+    roster_month = case.get("roster_month")
     host = urlsplit(parent).netloc
-    parts = urlsplit(url)
-    if (parts.scheme != "https" or parts.netloc != host or parts.hostname != host
-            or parts.query or parts.fragment or not parts.path.endswith(".pdf")):
-        raise CaptureError("unexpected_attachment_origin")
+    if roster_month is None:
+        parts = urlsplit(url)
+        if (parts.scheme != "https" or parts.netloc != host or parts.hostname != host
+                or parts.query or parts.fragment or not parts.path.endswith(".pdf")):
+            raise CaptureError("unexpected_attachment_origin")
     fetcher = Fetcher(cache_dir=Path("/tmp/pdf-parent"), transport=httpx.HTTPTransport(trust_env=False),
                       strict_html_hosts={host: {}})
     try:
@@ -107,16 +114,23 @@ def fetch(case, quarantine):
             title = title_node.attributes.get("content", "") if title_node else ""
         else:
             title = first_text(tree, "#con_title, h1") or ""
-        attachments = {item["url"] for item in collect_attachment_links(tree, parent, [host])}
-        attachments.update(miit_pdf_links(page.text, parent))
-        if host == "www.cac.gov.cn":
-            article = tree.css_first("#BodyLabel")
-            visible = article.text(separator="\n", strip=True) if article else ""
-            # This publisher prints the exact attachment URL next to its viewer link.
-            attachments.update(urljoin(parent, line.strip()) for line in visible.splitlines()
-                               if line.strip() in {url, url.removeprefix("https:")})
-        if case["title"] not in title or url not in attachments:
-            raise CaptureError("publisher_link_not_verified")
+        if roster_month is not None:
+            from route_probe import CAC_ROSTER_INDEX, cac_roster_links
+
+            url = cac_roster_links(page.text).get(roster_month)
+            if parent != CAC_ROSTER_INDEX or title != case["title"] or not url:
+                raise CaptureError("publisher_link_not_verified")
+        else:
+            attachments = {item["url"] for item in collect_attachment_links(tree, parent, [host])}
+            attachments.update(miit_pdf_links(page.text, parent))
+            if host == "www.cac.gov.cn":
+                article = tree.css_first("#BodyLabel")
+                visible = article.text(separator="\n", strip=True) if article else ""
+                # This publisher prints the exact attachment URL next to its viewer link.
+                attachments.update(urljoin(parent, line.strip()) for line in visible.splitlines()
+                                   if line.strip() in {url, url.removeprefix("https:")})
+            if case["title"] not in title or url not in attachments:
+                raise CaptureError("publisher_link_not_verified")
         if selector := case.get("prose_selector"):
             paragraphs = complete_body_paragraphs(tree, selector)
             markers = [i for i, text in enumerate(paragraphs) if compact(text) == case["annex_intro"]]
@@ -131,7 +145,8 @@ def fetch(case, quarantine):
         with fetcher._client.stream("GET", url, follow_redirects=False,
                                     headers={"Accept": "application/pdf", "Accept-Encoding": "identity"}) as response:
             mime = response.headers.get("content-type", "").partition(";")[0].strip().casefold()
-            if response.status_code != 200 or mime != "application/pdf":
+            allowed_mime = {"application/pdf", "application/octet-stream"} if roster_month else {"application/pdf"}
+            if response.status_code != 200 or mime not in allowed_mime:
                 raise CaptureError("unexpected_attachment_response")
             size = 0
             with dest.open("xb") as output:
@@ -144,7 +159,7 @@ def fetch(case, quarantine):
                     output.write(chunk)
             if not size:
                 raise CaptureError("empty_pdf")
-        return {"status": "downloaded", "bytes": size}
+        return {"status": "downloaded", "bytes": size, **({"mime": mime} if roster_month else {})}
     finally:
         fetcher.close()
 
@@ -519,6 +534,25 @@ def write_capture(case, path, output, paragraphs, spans):
     save_manifest(manifest, manifest_path)
 
 
+def measure_roster(reader):
+    if not 1 <= len(reader.pages) <= 160:
+        raise CaptureError("roster_page_cap")
+    headers = ("服务名称", "备案编号", "应用名称", "上线编号", "序号", "属地")
+    text_bytes = 0
+    counts = []
+    for page in reader.pages:
+        plain, layout = (page.extract_text(extraction_mode=mode) or "" for mode in ("plain", "layout"))
+        text_bytes += len(plain.encode("utf-8")) + len(layout.encode("utf-8"))
+        if text_bytes > 3 * 1024 * 1024:
+            raise CaptureError("text_size_cap")
+        ordered, visual = compact(plain), compact(layout)
+        counts.append({"characters": len(ordered), "layout_characters": len(visual),
+                       "same_order": ordered == visual, "same_characters": Counter(ordered) == Counter(visual),
+                       "replacement_characters": ordered.count("\ufffd") + visual.count("\ufffd"),
+                       "header_matches": [header in visual for header in headers]})
+    return {"status": "roster_measured", "pages": len(counts), "page_diagnostics": counts}
+
+
 def extract(case, quarantine, output=None):
     from pypdf import PdfReader
 
@@ -527,6 +561,10 @@ def extract(case, quarantine, output=None):
         reader = PdfReader(stream, strict=True)
         if reader.is_encrypted:
             raise CaptureError("encrypted_pdf")
+        if "roster_month" in case:
+            if output is not None:
+                raise CaptureError("roster_measurement_only")
+            return measure_roster(reader)
         if len(reader.pages) != case["pages"]:
             raise CaptureError("unexpected_page_count")
         text_by_mode = {}

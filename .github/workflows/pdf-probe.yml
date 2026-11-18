@@ -6,7 +6,7 @@ on:
       edition:
         description: Exact publisher attachment for the collector test
         type: choice
-        options: [tc260_005, miit_ethics_control, shanghai_manufacturing_2026]
+        options: [tc260_005, miit_ethics_control, shanghai_manufacturing_2026, cac_filing_2026_feb]
         default: tc260_005
       publish_private:
         description: Transfer a verified supported edition to the private intake repository
@@ -46,6 +46,7 @@ jobs:
             --memory=256m --pids-limit=24 --ulimit fsize=41943040:41943040 \
             --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m \
             --mount "type=bind,source=$GITHUB_WORKSPACE/pdf_capture.py,destination=/collector/pdf_capture.py,readonly" \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/route_probe.py,destination=/collector/route_probe.py,readonly" \
             --mount "type=bind,source=$RUNNER_TEMP/mojito-pdf-quarantine,destination=/quarantine" \
             --entrypoint python mojito-chinese-collector -B /collector/pdf_capture.py fetch "$EDITION" /quarantine
       - name: Measure text extraction without network access
