@@ -141,6 +141,9 @@ def historical_edition(entry, name):
         selectors = edition["article"]
         title = first_text(tree, selectors["title"])
         body = complete_body_paragraphs(tree, selectors["body"])
+        if footer_prefixes := selectors.get("trailing_navigation_labels"):
+            while body and body[-1].replace(" ", "").replace("：", ":").startswith(tuple(footer_prefixes)):
+                body.pop()
         visible = tree.body.text(separator=" ", strip=True)
         if pattern := selectors.get("date_label_pattern"):
             dates = {parse_date_zh(value) for value in re.findall(pattern, visible)}

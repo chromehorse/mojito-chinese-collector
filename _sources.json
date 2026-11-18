@@ -683,7 +683,11 @@
           "article": {
             "title": "h1",
             "date_label_pattern": "时间\\s*[：:]\\s*(\\d{4}-\\d{2}-\\d{2})\\s+\\d{2}:\\d{2}\\s+浏览次数",
-            "body": ".content"
+            "body": ".content",
+            "trailing_navigation_labels": [
+              "上一篇:",
+              "下一篇:"
+            ]
           },
           "body_markers": [
             "甘政发〔2026〕1号",
