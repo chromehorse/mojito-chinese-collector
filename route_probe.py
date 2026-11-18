@@ -18,6 +18,14 @@ QIUSHI_SNAPSHOT = "https://web.archive.org/web/20260521082819id_/" + QIUSHI_FIRS
 QIUSHI_INTERVIEW = "https://www.qstheory.cn/20251231/18ec77b7dded4aa799e537c6068f8050/c.html"
 QIUSHI_INTERVIEW_SNAPSHOT = "https://web.archive.org/web/20260417202126id_/" + QIUSHI_INTERVIEW
 CASES = {
+    "wuhan_action_plan": (
+        ("municipal_original",
+         "https://www.wuhan.gov.cn/zwgk/xxgk/zfwj/bgtwj/202603/t20260323_2743481.shtml",
+         "", "营造全社会共同参与的良好氛围"),
+        ("municipal_mobile_edition",
+         "https://3g.wuhan.gov.cn/zwgk/xxgk/zfwj/bgtwj/202603/t20260323_2743481.shtml",
+         "", "营造全社会共同参与的良好氛围"),
+    ),
     "people": (
         ("commentary_index", "https://opinion.people.com.cn/GB/8213/49160/index.html", r"/n1/\d{4}/", ""),
         ("zhongsheng_index", "https://opinion.people.com.cn/GB/8213/49160/461972/index.html", r"/n1/\d{4}/", ""),
