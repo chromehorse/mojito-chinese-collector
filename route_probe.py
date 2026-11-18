@@ -183,7 +183,7 @@ def compare_qiushi_article(fetcher):
     same_metadata = bool(known_edition and all(current[key] == saved[key] for key in ("title", "date", "author")))
     same_body = current["body_paragraphs"] == saved["body_paragraphs"]
     body = current["body_paragraphs"]
-    compact = [re.sub(r"\s+", "", paragraph).replace("：", ":") for paragraph in body]
+    compact = ["".join(paragraph.split()).replace("：", ":") for paragraph in body]
     anchors = ("记者:", "王琛伟:", "刘冬梅:", "李晓华:")
     found_turns = sum(any(marker in paragraph for paragraph in compact) for marker in anchors)
     ending = "记者:感谢各位专家接受采访。"
