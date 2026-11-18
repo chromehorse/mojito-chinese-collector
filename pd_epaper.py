@@ -22,7 +22,7 @@ HOST = "paper.people.com.cn"
 SECTIONS = ("评论", "理论", "国际", "要闻", "政治", "科技", "经济", "财经")
 COLUMNS = ("人民时评", "人民论坛", "人民观点", "评论员观察", "钟声", "纵横", "现场评论", "微观",
            "连线评论员", "法治聚焦", "人民锐评", "政策解读")
-AI_TITLES = ("人工智能", "大模型", "智能体", "算力")
+AI_TITLES = ("人工智能", "大模型", "智能体", "算力", "AI")
 REPORTER_CREDIT = re.compile(r"(本报记者|记者)\s*(.+)")
 REPORTER_DATELINE = re.compile(r"^本报[\u3400-\u9fff]{1,16}\d{1,2}月\d{1,2}日(?:电|讯)\s*[（(](记者[^）)]+)[）)]")
 CONTROLS = {
@@ -195,6 +195,11 @@ def parse_epaper(text, entry, url):
 
 def parse_collection_article(text, entry, url):
     article = parse_epaper(text, entry, url)
+    if clean_tree(text).css("#ozoom img, #ozoom svg, #ozoom canvas"):
+        # Text extraction cannot establish the contents of a publisher graphic.
+        # process_recipe already stages abstract_only editions as incomplete.
+        # Each URL owns its recipe copy; do not alter the shared ENTRY recipe.
+        entry["recipe"] = {**entry["recipe"], "abstract_only": True}
     if reporter_credit(article["author"] or ""):
         # This is the single-article entry created for process_recipe below.
         entry["source_genre_default"] = "news"
