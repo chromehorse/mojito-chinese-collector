@@ -653,5 +653,49 @@
         }
       }
     }
+  },
+  {
+    "id": "pingliang_ai_policy",
+    "name": "平凉市数据局 Pingliang Data Bureau",
+    "kind": "listing",
+    "list_url": "https://zsj.pingliang.gov.cn/cyzc/art/2026/art_d5e1e5ab4183477bb85294c3153b18e4.html",
+    "allowed_domains": [
+      "zsj.pingliang.gov.cn"
+    ],
+    "country": "CN",
+    "language": "zh",
+    "corpus": "government",
+    "authority_level": "regulator",
+    "source_genre_default": "decree",
+    "independence_cluster": "gansu-provincial-government",
+    "cadence_days": 30,
+    "backfill_cap": 1,
+    "status": "blocked",
+    "status_evidence": "Native crawl policy could not be verified. The isolated text probe found the full official Gansu action plan.",
+    "recipe": {
+      "self_article": true,
+      "strict_html": {},
+      "historical_editions": {
+        "gansu_action_plan_2026": {
+          "url": "https://zsj.pingliang.gov.cn/cyzc/art/2026/art_d5e1e5ab4183477bb85294c3153b18e4.html",
+          "published": "2026-01-19",
+          "title_text": "深入实施“人工智能+”行动方案",
+          "article": {
+            "title": "h1",
+            "date_label_pattern": "时间\\s*[：:]\\s*(\\d{4}-\\d{2}-\\d{2})\\s+\\d{2}:\\d{2}\\s+浏览次数",
+            "body": ".content"
+          },
+          "body_markers": [
+            "甘政发〔2026〕1号",
+            "2026年1月6日",
+            "一、总体要求",
+            "二、重点实施领域",
+            "（十四）推进全链条安全管控"
+          ],
+          "last_text": "营造全社会共同参与的良好氛围。",
+          "document_number": "甘政发〔2026〕1号"
+        }
+      }
+    }
   }
 ]
