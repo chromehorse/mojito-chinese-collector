@@ -15,6 +15,9 @@ on:
       recipes:
         description: Comma-separated recipe IDs that failed the regular local scraper
         type: string
+      edition:
+        description: A registered historical edition for one failed publisher
+        type: string
       verify_epaper:
         description: Use two fixed public e-paper editions for an end-to-end test
         type: boolean
@@ -64,6 +67,7 @@ jobs:
         env:
           FALLBACK_RECIPES: ${{ inputs.recipes }}
           VERIFY_EPAPER: ${{ inputs.verify_epaper }}
+          HISTORICAL_EDITION: ${{ inputs.edition }}
         run: |
           if [[ ! "$FALLBACK_RECIPES" =~ ^[a-z0-9_-]+(,[a-z0-9_-]+)*$ ]]; then
             printf '{"status":"missing_or_invalid_recipes"}\n'
@@ -80,6 +84,13 @@ jobs:
               *) selected+=(--recipe "$recipe") ;;
             esac
           done
+          if [[ -n "$HISTORICAL_EDITION" ]]; then
+            if [[ ! "$HISTORICAL_EDITION" =~ ^[a-z0-9_-]+$ ]] || ((${#selected[@]} != 2 || ${#recipes[@]} != 1)); then
+              printf '{"status":"invalid_historical_edition_selection"}\n'
+              exit 1
+            fi
+            selected+=(--edition "$HISTORICAL_EDITION")
+          fi
           install -d -m 700 "$RUNNER_TEMP/collector-state"
           container=(--rm --read-only --cap-drop=ALL --security-opt=no-new-privileges
             --memory=1024m --pids-limit=64 --user "$(id -u):$(id -g)" \

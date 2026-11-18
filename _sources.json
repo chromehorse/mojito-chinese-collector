@@ -178,6 +178,26 @@
         "date": "span#pubtime, .info",
         "author": "",
         "body": "#BodyLabel, .main-content"
+      },
+      "historical_editions": {
+        "companion_services_2026": {
+          "url": "https://www.cac.gov.cn/2026-04/10/c_1777558395078289.htm",
+          "published": "2026-04-10",
+          "title_text": "人工智能拟人化互动服务管理暂行办法",
+          "article": {
+            "title": "h1",
+            "date": "span#pubtime",
+            "body": "#BodyLabel"
+          },
+          "body_markers": [
+            "第一条",
+            "第三十二条",
+            "第21号"
+          ],
+          "last_text": "本办法自2026年7月15日起施行。",
+          "document_number": "令 第21号",
+          "numbered_articles": 32
+        }
       }
     }
   },
@@ -588,6 +608,50 @@
         "人工智能科技伦理审查与服务办法"
       ],
       "strict_html": {}
+    }
+  },
+  {
+    "id": "fujian_ndrc_policy",
+    "name": "福建省发展和改革委员会 Fujian Development and Reform Commission",
+    "kind": "listing",
+    "list_url": "https://fgw.fujian.gov.cn/ztzl/cjzxjyzx/zcfg/202602/t20260212_7098061.htm",
+    "allowed_domains": [
+      "fgw.fujian.gov.cn"
+    ],
+    "country": "CN",
+    "language": "zh",
+    "corpus": "government",
+    "authority_level": "regulator",
+    "source_genre_default": "decree",
+    "independence_cluster": "ndrc",
+    "cadence_days": 30,
+    "backfill_cap": 1,
+    "status": "blocked",
+    "status_evidence": "The strict native text collector could not verify crawl policy. An isolated probe retrieved the dated official republication.",
+    "recipe": {
+      "self_article": true,
+      "strict_html": {},
+      "historical_editions": {
+        "procurement_2026": {
+          "url": "https://fgw.fujian.gov.cn/ztzl/cjzxjyzx/zcfg/202602/t20260212_7098061.htm",
+          "published": "2026-02-12",
+          "title_text": "关于加快招标投标领域人工智能推广应用的实施意见",
+          "article": {
+            "title": ".article_title",
+            "date_label_pattern": "来源[：:]\\s*国家发展改革委\\s*时间[：:]\\s*(\\d{4}-\\d{2}-\\d{2})",
+            "body": "div.TRS_Editor"
+          },
+          "body_markers": [
+            "一、总体目标",
+            "二、加快推进场景应用",
+            "三、规范部署实施",
+            "四、加强组织保障",
+            "20.投诉处理"
+          ],
+          "last_text": "2026年2月6日",
+          "document_number": "发改法规〔2026〕195号"
+        }
+      }
     }
   }
 ]

@@ -116,7 +116,58 @@ def publisher_options(entries, max_pages):
     return hosts
 
 
-def collect(data, recipe_ids=(), cap=None):
+def historical_edition(entry, name):
+    """Use an exact registered document when a rolling index no longer lists it."""
+    from scraper.adapters._common import (AdapterError, clean_tree, collect_attachment_links,
+                                          complete_body_paragraphs, first_text, parse_date_zh)
+
+    edition = entry["recipe"].get("historical_editions", {}).get(name)
+    if not edition:
+        raise ValueError("Unknown historical edition for the selected publisher.")
+    url = edition["url"]
+    origin = urlsplit(url)
+    if (origin.scheme != "https" or origin.netloc != origin.hostname
+            or origin.hostname not in entry["allowed_domains"] or origin.fragment):
+        raise ValueError("Historical edition must use an exact registered HTTPS origin.")
+    recipe = {"self_article": True}
+    if "strict_html" in entry["recipe"]:
+        recipe["strict_html"] = entry["recipe"]["strict_html"]
+    pinned = {**entry, "kind": "listing", "list_url": url, "backfill_cap": 1,
+              "allowed_domains": [origin.hostname], "recipe": recipe}
+
+    def parse(html, source, requested):
+        tree = clean_tree(html)
+        selectors = edition["article"]
+        title = first_text(tree, selectors["title"])
+        body = complete_body_paragraphs(tree, selectors["body"])
+        visible = tree.body.text(separator=" ", strip=True)
+        if pattern := selectors.get("date_label_pattern"):
+            dates = {parse_date_zh(value) for value in re.findall(pattern, visible)}
+            published = dates.pop() if len(dates) == 1 else None
+        else:
+            published = parse_date_zh(first_text(tree, selectors["date"]))
+        if (requested != url or published != edition["published"] or not title or not body
+                or edition["title_text"] not in title
+                or any(not any(marker in paragraph for paragraph in body) for marker in edition["body_markers"])
+                or not body[-1].endswith(edition["last_text"])):
+            raise AdapterError("Historical edition failed its publisher, date or content checks.")
+        if numbering := edition.get("numbered_articles"):
+            numbers = re.findall(r"^第([一二三四五六七八九十]+)条", "\n".join(body), re.M)
+            digits = "一二三四五六七八九"
+            labels = [*digits, "十", *("十" + digit for digit in digits), "二十",
+                      *("二十" + digit for digit in digits), "三十", *("三十" + digit for digit in digits)]
+            if not 0 < numbering <= len(labels) or numbers != labels[:numbering]:
+                raise AdapterError("Historical edition has missing or out-of-order articles.")
+        document_number = edition.get("document_number")
+        if document_number and document_number not in visible:
+            raise AdapterError("Historical edition does not carry its expected document number.")
+        return {"title": title, "date": published, "document_number": document_number, "body_paragraphs": body,
+                "attachments": collect_attachment_links(tree, requested, source["allowed_domains"])}
+
+    return pinned, parse
+
+
+def collect(data, recipe_ids=(), cap=None, edition=None):
     import httpx
     import run as scraper_run
     from scraper.adapters import policy_api
@@ -128,8 +179,16 @@ def collect(data, recipe_ids=(), cap=None):
     if unknown:
         raise ValueError(f"Unknown collector recipes: {', '.join(sorted(unknown))}.")
     selected = [entry for entry in registry if not recipe_ids or entry["id"] in recipe_ids]
-    entries = [entry for entry in selected if entry["status"] == "active"]
-    deferred = {entry["id"]: entry["status"] for entry in selected if entry["status"] != "active"}
+    article_parsers = {"miit_kjs": parse_miit_article}
+    if edition:
+        if len(recipe_ids) != 1 or len(selected) != 1:
+            raise ValueError("A historical edition requires exactly one publisher recipe.")
+        pinned, parse_edition = historical_edition(selected[0], edition)
+        article_parsers[pinned["id"]] = parse_edition
+        entries, deferred = [pinned], {}
+    else:
+        entries = [entry for entry in selected if entry["status"] == "active"]
+        deferred = {entry["id"]: entry["status"] for entry in selected if entry["status"] != "active"}
     for entry in entries:
         entry["list_url"] = https_url(entry["list_url"])
         recipe = entry["recipe"]
@@ -153,7 +212,7 @@ def collect(data, recipe_ids=(), cap=None):
         try:
             summaries = [scraper_run.process_recipe(entry, fetcher, manifest, cap=cap, incremental=True,
                                                     out_dir=output / "_normalized",
-                                                    article_parser=parse_miit_article if entry["id"] == "miit_kjs" else None)
+                                                    article_parser=article_parsers.get(entry["id"]))
                          for entry in entries]
         finally:
             fetcher.close()
@@ -170,11 +229,11 @@ def failed_report(report):
     )
 
 
-def print_collection_summary(data, recipe_ids, cap):
+def print_collection_summary(data, recipe_ids, cap, edition=None):
     """Keep publisher output in the collector's private working directory."""
     try:
         with open(os.devnull, "w") as sink, redirect_stdout(sink), redirect_stderr(sink):
-            report = collect(data.resolve(), recipe_ids, cap)
+            report = collect(data.resolve(), recipe_ids, cap, edition)
     except Exception:
         # The public entry point must not put publisher strings or local paths in a traceback.
         print(json.dumps({"status": "error"}))
@@ -200,6 +259,7 @@ def main():
     fetch = commands.add_parser("collect")
     fetch.add_argument("--data", type=Path, required=True)
     fetch.add_argument("--recipe", action="append", default=[])
+    fetch.add_argument("--edition", help="exact historical edition declared by the selected recipe")
     fetch.add_argument("--cap", type=int)
     fetch.add_argument("--summary-only", action="store_true",
                        help="print only aggregate counts and a fixed status label")
@@ -211,8 +271,8 @@ def main():
         if args.cap is not None and args.cap < 1:
             parser.error("--cap must be positive")
         if args.summary_only:
-            return print_collection_summary(args.data, args.recipe, args.cap)
-        report = collect(args.data.resolve(), args.recipe, args.cap)
+            return print_collection_summary(args.data, args.recipe, args.cap, args.edition)
+        report = collect(args.data.resolve(), args.recipe, args.cap, args.edition)
         print(json.dumps(report, ensure_ascii=False))
         return int(failed_report(report))
     except (OSError, ValueError) as error:
