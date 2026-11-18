@@ -1,0 +1,37 @@
+name: Isolated browser source test
+
+on:
+  workflow_dispatch:
+    inputs:
+      recipe:
+        description: Browser-dependent recipe whose local route failed
+        type: choice
+        options: [gov_policy_db, zrbzf_yanjiu, kxjszx_yanjiu]
+        default: gov_policy_db
+
+permissions: {}
+
+jobs:
+  browser:
+    if: >-
+      github.repository == 'chromehorse/mojito-chinese-collector' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Retrieve trusted collector code
+        run: |
+          git init -q
+          git fetch -q --depth=1 "https://github.com/$GITHUB_REPOSITORY.git" "$GITHUB_SHA"
+          git checkout -q --detach FETCH_HEAD
+      - name: Build the existing Playwright container route
+        run: docker build -f Dockerfile.browser -t mojito-browser-collector .
+      - name: Test one approved publisher with the Chromium sandbox enabled
+        env:
+          RECIPE: ${{ inputs.recipe }}
+        run: |
+          timeout --signal=TERM 300s docker run --rm --init --read-only --cap-drop=ALL \
+            --security-opt=no-new-privileges --security-opt "seccomp=$GITHUB_WORKSPACE/browser-seccomp.json" \
+            --memory=1536m --pids-limit=160 --tmpfs /tmp:rw,nosuid,nodev,noexec,size=512m \
+            --tmpfs /data:rw,nosuid,nodev,noexec,size=32m,mode=1777 \
+            -e HOME=/tmp mojito-browser-collector "$RECIPE"

@@ -1,0 +1,10 @@
+FROM mcr.microsoft.com/playwright/python:v1.64.1-noble
+
+WORKDIR /collector
+COPY requirements.txt ./
+RUN python -m pip install --no-cache-dir --only-binary=:all: -r requirements.txt playwright==1.64.1
+COPY _sources.json run.py browser_capture.py ./
+COPY scraper/ ./scraper/
+
+USER pwuser
+ENTRYPOINT ["python", "-B", "browser_capture.py"]
