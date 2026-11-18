@@ -92,18 +92,21 @@ def parse_epaper(text, entry, url):
     if control := CONTROL_TEXT.get(path.rsplit("/", 1)[-1]):
         markers, ending = control
         body = parsed["body_paragraphs"]
-        if not all(any(marker in paragraph for paragraph in body) for marker in markers) or not body[-1].endswith(ending):
-            raise AdapterError("E-paper control differs from the complete printed body")
+        if not all(any(marker in paragraph for paragraph in body) for marker in markers):
+            raise AdapterError("control_markers")
+        if not body[-1].endswith(ending):
+            raise AdapterError("control_ending")
     if not parsed["author"] and "（钟声）" in parsed["title"]:
         parsed["author"] = "钟声"
     return parsed
 
 
-def collect(output, dates, *, verify_controls, cap=4):
+def collect(output, dates, *, verify_controls, cap=4, control_articles_only=False):
     totals = {"status": "ok", "issues": len(dates), "discovered": 0, "parsed": 0,
               "written": 0, "confirmed_controls": 0, "parse_failures": 0, "fetch_failures": 0,
               "issues_checked": 0, "issues_incomplete": 0, "issues_without_candidates": 0,
               "layout_failures": 0, "capped_candidates": 0}
+    controls = []
     fetcher = Fetcher(cache_dir=output.parent / "cache",
                       transport=httpx.HTTPTransport(trust_env=False), strict_html_hosts={HOST: {}})
     manifest_path = output / "manifest.json"
@@ -111,13 +114,17 @@ def collect(output, dates, *, verify_controls, cap=4):
     try:
         for edition in dates:
             parsed_before = totals["parsed"]
-            candidates, failures = articles_from_edition(edition, fetcher)
+            control = CONTROLS.get(edition.isoformat()) if verify_controls else None
+            if control_articles_only:
+                candidates = [f"https://{HOST}/rmrb/pc/content/{edition:%Y%m}/{edition:%d}/{control}"]
+                failures = 0
+            else:
+                candidates, failures = articles_from_edition(edition, fetcher)
             totals["issues_checked"] += 1
             totals["issues_incomplete"] += bool(failures)
             totals["layout_failures"] += failures
             totals["issues_without_candidates"] += not failures and not candidates
             totals["discovered"] += len(candidates)
-            control = CONTROLS.get(edition.isoformat()) if verify_controls else None
             if control:
                 candidates = [url for url in candidates if url.endswith("/" + control)]
                 totals["confirmed_controls"] += bool(candidates)
@@ -131,6 +138,14 @@ def collect(output, dates, *, verify_controls, cap=4):
                                         out_dir=output / "_normalized", article_parser=parse_epaper)
                 for key in ("parsed", "written", "parse_failures", "fetch_failures"):
                     totals[key] += report[key]
+                if control:
+                    outcome = "written" if report["written"] else "no_result"
+                    if report["parse_failures"]:
+                        detail = manifest["failures"][-1]["detail"]
+                        outcome = detail if detail in {"control_markers", "control_ending"} else "article_parse"
+                    elif report["fetch_failures"]:
+                        outcome = "article_fetch"
+                    controls.append(outcome)
             if totals["parsed"] > parsed_before:
                 save_manifest(manifest, manifest_path)
             if HOST in fetcher._stopped_hosts:
@@ -142,17 +157,22 @@ def collect(output, dates, *, verify_controls, cap=4):
         totals["status"] = "partial"
     if verify_controls and (totals["confirmed_controls"] != len(dates) or totals["written"] != len(dates)):
         totals["status"] = "control_failed"
+    if verify_controls:
+        totals["control_outcomes"] = controls
     return totals
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--verify-controls", action="store_true")
+    parser.add_argument("--control-articles-only", action="store_true")
     parser.add_argument("--data", type=Path, default=Path("/data"))
     parser.add_argument("--first", type=date.fromisoformat)
     parser.add_argument("--last", type=date.fromisoformat)
     parser.add_argument("issues", nargs="*", type=date.fromisoformat)
     args = parser.parse_args()
+    if args.control_articles_only and not args.verify_controls:
+        parser.error("Use article-only verification with registered controls.")
     now = datetime.now(timezone(timedelta(hours=8))).date()
     if args.first or args.last:
         if (args.issues or args.verify_controls or not args.first or not args.last
@@ -167,7 +187,8 @@ def main():
         cap = 4
     try:
         with open(os.devnull, "w") as sink, redirect_stdout(sink), redirect_stderr(sink):
-            result = collect(args.data / "output", dates, verify_controls=args.verify_controls, cap=cap)
+            result = collect(args.data / "output", dates, verify_controls=args.verify_controls, cap=cap,
+                             control_articles_only=args.control_articles_only)
     except Exception as error:
         print(json.dumps({"status": "epaper_failed", "error_type": type(error).__name__}))
         return 1

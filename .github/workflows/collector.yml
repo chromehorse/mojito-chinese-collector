@@ -113,7 +113,9 @@ jobs:
               exit 1
             fi
             if [ "$VERIFY_EPAPER" = true ]; then dates=(--verify-controls 2026-11-17 2026-09-16); fi
-            if [ "$VERIFY_EPAPER_HISTORY" = true ]; then dates=(--verify-controls 2026-01-05 2026-01-09); fi
+            if [ "$VERIFY_EPAPER_HISTORY" = true ]; then
+              dates=(--verify-controls --control-articles-only 2026-01-05 2026-01-09)
+            fi
             docker run "${container[@]}" \
               --mount "type=bind,source=$GITHUB_WORKSPACE/pd_epaper.py,destination=/collector/pd_epaper.py,readonly" \
               --entrypoint python mojito-chinese-collector -B /collector/pd_epaper.py "${dates[@]}" || result=$?
