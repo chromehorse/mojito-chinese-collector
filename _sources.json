@@ -701,5 +701,27 @@
         }
       }
     }
+  },
+  {
+    "id": "shanghai_manufacturing_grant",
+    "name": "上海市经济和信息化委员会",
+    "kind": "listing",
+    "list_url": "https://www.sheitc.sh.gov.cn/cyfz/20260112/11e3168ff89a4eeea2b1afd193c19418.html",
+    "allowed_domains": [
+      "www.sheitc.sh.gov.cn"
+    ],
+    "country": "CN",
+    "language": "zh",
+    "corpus": "government",
+    "authority_level": "regulator",
+    "source_genre_default": "decree",
+    "independence_cluster": "shanghai-municipal-government",
+    "cadence_days": 30,
+    "backfill_cap": 1,
+    "status": "blocked",
+    "status_evidence": "The regular scraper verified the official parent and PDF link. The full annex requires the isolated publisher PDF route.",
+    "recipe": {
+      "strict_html": {}
+    }
   }
 ]
