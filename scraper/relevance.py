@@ -1,4 +1,5 @@
-"""Keyword gate over title+body. Recall-biased: ANY hit passes."""
+"""Recall-biased harvest gate; D9 relevance tiers are recomputed before analysis."""
+import re
 
 KEYWORDS = [
     "人工智能", "生成式人工智能", "大模型", "智能体", "算法", "自动化",
@@ -10,4 +11,5 @@ KEYWORDS = [
 
 def is_relevant(title, body_text):
     haystack = (title or "") + "\n" + (body_text or "")
-    return any(kw in haystack for kw in KEYWORDS)
+    return (any(kw in haystack for kw in KEYWORDS)
+            or bool(re.search(r"(?<![A-Za-z0-9])AI(?![A-Za-z0-9])", haystack)))

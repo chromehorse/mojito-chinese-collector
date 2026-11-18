@@ -195,11 +195,6 @@ def parse_epaper(text, entry, url):
 
 def parse_collection_article(text, entry, url):
     article = parse_epaper(text, entry, url)
-    if clean_tree(text).css("#ozoom img, #ozoom svg, #ozoom canvas"):
-        # Text extraction cannot establish the contents of a publisher graphic.
-        # process_recipe already stages abstract_only editions as incomplete.
-        # Each URL owns its recipe copy; do not alter the shared ENTRY recipe.
-        entry["recipe"] = {**entry["recipe"], "abstract_only": True}
     if reporter_credit(article["author"] or ""):
         # This is the single-article entry created for process_recipe below.
         entry["source_genre_default"] = "news"
