@@ -91,6 +91,10 @@ CASES = {
         ("fujian_current_provincial_plan", "https://www.fujian.gov.cn/zwgk/zfxxgk/szfwj/jgzz/fzggwjzc/202611/t20261112_7248400.htm",
          "", "闽政办〔2026〕34号"),
     ),
+    "gansu_article_boundary": (
+        ("gansu_full_official_copy", "https://zsj.pingliang.gov.cn/cyzc/art/2026/art_d5e1e5ab4183477bb85294c3153b18e4.html",
+         "", "甘政发〔2026〕1号"),
+    ),
 }
 BODY = ("div.TRS_Editor", ".trs_editor_view", "#UCAP-CONTENT", "#ozoom", "#articleContent",
         "#article-content", "#article", "#content", ".content", ".article-content", ".article_content",
@@ -120,10 +124,20 @@ def inspect(fetcher, name, url, pattern, marker, domains):
             text = "\n".join(paragraphs)
             bodies.append([selector, len(paragraphs), len(text),
                            marker in text if marker else None])
-    return {"case": name, "status": 200,
-            "titles": [s for s in TITLE if first_text(tree, s)],
-            "dates": [s for s in DATE if parse_date_zh(first_text(tree, s))],
-            "bodies": bodies, "inline_papers": len(tree.css("div.paperBox"))}
+    result = {"case": name, "status": 200,
+              "titles": [s for s in TITLE if first_text(tree, s)],
+              "dates": [s for s in DATE if parse_date_zh(first_text(tree, s))],
+              "bodies": bodies, "inline_papers": len(tree.css("div.paperBox"))}
+    if name == "gansu_full_official_copy":
+        paragraphs = complete_body_paragraphs(tree, ".content")
+        endings = [i for i, p in enumerate(paragraphs) if p.endswith("营造全社会共同参与的良好氛围。")]
+        if len(endings) == 1:
+            suffix = paragraphs[endings[0] + 1:]
+            result.update(paragraphs_after_ending=len(suffix),
+                          navigation_prefix=bool(suffix and suffix[0].startswith(("下一篇:", "下一篇："))),
+                          navigation_node=any(node.text(strip=True).startswith(("下一篇:", "下一篇："))
+                                              for node in tree.css(".content div:last-child, .content p:last-child")))
+    return result
 
 
 def compare_qiushi_archive(fetcher):
