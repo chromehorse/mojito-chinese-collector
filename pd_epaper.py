@@ -288,7 +288,7 @@ def main():
         dates = args.issues or [now, now - timedelta(days=1)]
         if args.verify_controls and any(d.isoformat() not in CONTROLS for d in dates):
             parser.error("Each control requires a registered edition date.")
-        cap = 4
+        cap = 4 if args.verify_controls else None
     try:
         with open(os.devnull, "w") as sink, redirect_stdout(sink), redirect_stderr(sink):
             result = collect(args.data / "output", dates, verify_controls=args.verify_controls, cap=cap,
