@@ -19,6 +19,9 @@ CASES = {
         "parent": "https://www.cac.gov.cn/2026-05/22/c_1781191242686496.htm",
         "pdf": "https://www.cac.gov.cn/rootimages/uploadimg/1781191242772713/1781191242772713.pdf",
         "title": "人工智能应用伦理安全指引",
+        "record_title": "人工智能应用伦理安全指引 1.0",
+        "source": "cac_regs",
+        "source_genre": "guidance",
         "opening": "人工智能应用伦理安全指引",
         "date": "2026-05-19",
         "document_number": "TC260-005",
@@ -45,6 +48,8 @@ CASES = {
         "parent": "https://www.sheitc.sh.gov.cn/cyfz/20260112/11e3168ff89a4eeea2b1afd193c19418.html",
         "pdf": "https://www.sheitc.sh.gov.cn/cmsres/bd/bd2a507f86fd48eea75d71c94d247c84/3d967ffb9266571689033d2857f6a0ee.pdf",
         "title": "上海市经济信息化委关于组织2026年上海市制造业智能化发展项目申报的通知",
+        "source": "shanghai_manufacturing_grant",
+        "source_genre": "decree",
         "opening": "上海市经济和信息化委员会文件",
         "date": "2026-01-12",
         "document_number": "沪经信软〔2026〕20号",
@@ -149,6 +154,7 @@ def annex_coordinates(page):
     from pypdf._text_extraction._layout_mode._fixed_width_page import (
         TextStateManager, recurse_to_target_op, set_font_operation,
     )
+    from pypdf.generic import ArrayObject, ContentStream, StreamObject
 
     lines = set()
     horizontal, vertical = set(), set()
@@ -183,14 +189,17 @@ def annex_coordinates(page):
             previous = None
 
     page.extract_text(visitor_operand_before=inspect)
-    contents = page.get_contents()
-    if contents is None:
+    contents = page.get("/Contents")
+    if contents is not None:
+        contents = contents.get_object()
+    if not isinstance(contents, (ArrayObject, StreamObject)):
         raise CaptureError("annex_content_missing")
     # Reuse the pinned layout engine before it shifts the blocks left. The
     # table borders and text origins must share the page's coordinate system.
+    # Match its byte-based content reader so CID font codes remain intact.
     fonts = page._layout_mode_fonts()
     state = TextStateManager()
-    operations = iter(contents.operations)
+    operations = iter(ContentStream(contents, page.pdf, "bytes").operations)
     blocks = []
     for operands, operator in operations:
         if operator in (b"BT", b"q"):
@@ -459,12 +468,12 @@ def write_capture(case, path, output, paragraphs, spans):
     from scraper.normalize import build_record, to_markdown
     from scraper.registry import load_registry
 
-    entry = next(e for e in load_registry() if e["id"] == "cac_regs")
-    meta, text = build_record({"title": case["title"] + " 1.0", "date": case["date"],
+    entry = next(e for e in load_registry() if e["id"] == case["source"])
+    meta, text = build_record({"title": case.get("record_title", case["title"]), "date": case["date"],
                                "body_paragraphs": paragraphs, "document_number": case["document_number"],
                                "issuing_institution": case["publisher"]},
                               entry, case["pdf"], utcnow().isoformat())
-    meta.update(source_genre="guidance", attachment_parent=case["parent"],
+    meta.update(source_genre=case["source_genre"], attachment_parent=case["parent"],
                 attachment_sha256=sha256(path.read_bytes()).hexdigest(),
                 pdf_page_count=case["pages"], pdf_page_spans=",".join(f"{start}-{end}" for start, end in spans))
     normalized = output / "_normalized"
@@ -496,17 +505,13 @@ def extract(case, quarantine, output=None):
             text_by_mode[mode] = pages
         coordinates = annex_coordinates(reader.pages[case["annex_page"] - 1]) if "annex_page" in case else None
     modes = {mode: score_pages(case, pages) for mode, pages in text_by_mode.items()}
-    staged = {}
-    if output is not None:
+    if output is not None and not case.get("dashed_folios"):
         if "page_labels" not in case or any(
                 m["nonempty_pages"] != case["pages"] or not m["opening_found"] or m["replacement_characters"]
                 or m["anchor_hits"] != len(case["anchors"]) or m["cross_page_hits"] != len(case["cross_page"])
                 for m in modes.values()):
             raise CaptureError("edition_quality_gate")
         paragraphs, spans = normalize(case, text_by_mode)
-        write_capture(case, path, output, paragraphs, spans)
-        staged = {"staged": 1, "paragraphs": len(paragraphs),
-                  "cross_page_paragraphs": sum(first != last for first, last in spans)}
     page_modes_agree = [compact(plain) == compact(layout) for plain, layout in
                         zip(text_by_mode["plain"], text_by_mode["layout"], strict=True)]
     layout_diagnostics = {}
@@ -524,6 +529,11 @@ def extract(case, quarantine, output=None):
             "verified_paragraphs": len(paragraphs),
             "verified_cross_page_paragraphs": sum(first != last for first, last in spans),
         }
+    staged = {}
+    if output is not None:
+        write_capture(case, path, output, paragraphs, spans)
+        staged = {"staged": 1, "paragraphs": len(paragraphs),
+                  "cross_page_paragraphs": sum(first != last for first, last in spans)}
     return {"status": "measured", "pages": case["pages"], "page_modes_agree": page_modes_agree,
             "expected_anchors": len(case["anchors"]),
             "expected_cross_page": len(case["cross_page"]), "modes": modes, **layout_diagnostics, **staged}
