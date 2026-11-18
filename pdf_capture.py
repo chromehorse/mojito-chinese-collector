@@ -24,6 +24,15 @@ CASES = {
         "title_selector": "title",
         "probe_only": True,
     },
+    "ndrc_plan_2026_archive": {
+        "parent": "https://www.ndrc.gov.cn/fggz/fzzlgh/gjfzgh/",
+        "pdf": "https://www.ndrc.gov.cn/fggz/fzzlgh/gjfzgh/202603/U020260317369114704096.pdf",
+        "title": "国家发展战略和规划",
+        "title_selector": "title",
+        "parent_archive_timestamp": "20260719101554",
+        "archive_timestamp": "20260324133111",
+        "probe_only": True,
+    },
     "cac_filing_2026_feb": {
         "parent": "https://www.cac.gov.cn/2024-04/02/c_1713729983803145.htm",
         "pdf": ("https://www.cac.gov.cn/cms/pub/interact/downloadfile.jsp?filepath=NUtqEIwGiCjGm2Bhl20cvLGupl4aHWqlv5jFDErUO79vz0vHSSJ6sATU6DtmcGo1YoYJDltyJqpCTDRSAKq6GlAfqphfFn00jUfFRLdBE5I="
@@ -164,12 +173,17 @@ class CaptureError(ValueError):
 
 def fetch(case, quarantine):
     import httpx
-    from chinese_collector import miit_pdf_links
+    from chinese_collector import edition_snapshot, miit_pdf_links
     from scraper.adapters._common import clean_tree, collect_attachment_links, complete_body_paragraphs, first_text
     from scraper.config import MAX_PDF_BYTES
     from scraper.fetcher import Fetcher
 
     parent, url = case["parent"], case.get("pdf")
+    parent_request = edition_snapshot({"url": parent, "archive_timestamp": case.get("parent_archive_timestamp")}) or parent
+    attachment_request = edition_snapshot({"url": url, "archive_timestamp": case.get("archive_timestamp")}) or url
+    archived = parent_request != parent or attachment_request != url
+    if archived and (not case.get("probe_only") or parent_request == parent or attachment_request == url):
+        raise CaptureError("archive_inspection_only")
     roster_month = case.get("roster_month")
     host = urlsplit(parent).netloc
     if roster_month is None:
@@ -177,11 +191,12 @@ def fetch(case, quarantine):
         if (parts.scheme != "https" or parts.netloc != host or parts.hostname != host
                 or parts.query or parts.fragment or not parts.path.endswith(".pdf")):
             raise CaptureError("unexpected_attachment_origin")
+    request_host = urlsplit(parent_request).hostname
     fetcher = Fetcher(cache_dir=Path("/tmp/pdf-parent"), transport=httpx.HTTPTransport(trust_env=False),
-                      strict_html_hosts={host: {}})
+                      strict_html_hosts={host: {}, request_host: {}})
     try:
-        page = fetcher.fetch(parent, [host])
-        if not page.ok or page.final_url != parent:
+        page = fetcher.fetch(parent_request, [request_host])
+        if not page.ok or page.final_url != parent_request:
             raise CaptureError("parent_not_available")
         tree = clean_tree(page.text)
         if metadata_title := case.get("title_meta"):
@@ -213,12 +228,12 @@ def fetch(case, quarantine):
                 raise CaptureError("publisher_prose_boundary_not_verified")
             (quarantine / "parent-paragraphs.json").write_text(
                 json.dumps(paragraphs[:case["prose_count"]], ensure_ascii=False), encoding="utf-8")
-        if not fetcher._robots_allows(url):
+        if not fetcher._robots_allows(attachment_request):
             raise CaptureError("attachment_crawl_policy")
-        fetcher._polite_wait(url)
+        fetcher._polite_wait(attachment_request)
         dest = quarantine / "attachment.pdf"
         accept = "*/*" if roster_month else "application/pdf"
-        with fetcher._client.stream("GET", url, follow_redirects=False,
+        with fetcher._client.stream("GET", attachment_request, follow_redirects=False,
                                     headers={"Accept": accept, "Accept-Encoding": "identity"}) as response:
             mime = response.headers.get("content-type", "").partition(";")[0].strip().casefold()
             disposition = response.headers.get("content-disposition", "").partition(";")[0].strip().casefold()

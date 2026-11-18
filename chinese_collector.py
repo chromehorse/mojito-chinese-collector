@@ -117,6 +117,18 @@ def publisher_options(entries, max_pages):
     return hosts
 
 
+def edition_snapshot(edition):
+    timestamp = edition.get("archive_timestamp")
+    if timestamp is None:
+        return None
+    url = edition["url"]
+    origin = urlsplit(url)
+    if (not isinstance(timestamp, str) or not re.fullmatch(r"[0-9]{14}", timestamp) or origin.scheme != "https"
+            or origin.netloc != origin.hostname or origin.query or origin.fragment):
+        raise ValueError("An archived edition requires an exact HTTPS publisher URL and snapshot timestamp.")
+    return f"https://web.archive.org/web/{timestamp}id_/{url}"
+
+
 def historical_edition(entry, name):
     """Use an exact registered document when a rolling index no longer lists it."""
     from scraper.adapters._common import (AdapterError, clean_tree, collect_attachment_links,
