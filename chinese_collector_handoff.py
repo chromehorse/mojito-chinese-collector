@@ -115,7 +115,7 @@ def merge_batch(incoming, repository, *, include_incomplete=False):
     """Retain distinct editions and return the exact paths for one commit."""
     path = repository / MANIFEST
     existing = decode_manifest(bounded_read(path)) if path.exists() else {}
-    current_urls = {row["canonical_url"] for row in existing.values()}
+    current_urls = {row["canonical_url"] for row in existing.values() if row.get("body_complete") is True}
     added = []
     for rid, row in decode_manifest(bounded_read(incoming / MANIFEST)).items():
         if (row.get("body_complete") is not True
@@ -133,7 +133,10 @@ def merge_batch(incoming, repository, *, include_incomplete=False):
                 if not completed_capture(bounded_read(target), data):
                     raise ValueError("Completing an edition cannot change its text or fixed metadata.")
                 target.write_bytes(data)
-                existing[rid] = row
+                completed = {**existing[rid], **row}
+                if existing[rid].get("revision"):
+                    completed["revision"] = existing[rid]["revision"]
+                existing[rid] = completed
                 added.append(relative)
                 continue
             if row["source"] == "pd_epaper" and (corrected := complete_paper_byline(bounded_read(target), data)):
@@ -142,7 +145,8 @@ def merge_batch(incoming, repository, *, include_incomplete=False):
             continue
         if row["canonical_url"] in current_urls:
             row = {**row, "revision": "revision-detected"}
-        current_urls.add(row["canonical_url"])
+        if row.get("body_complete") is True:
+            current_urls.add(row["canonical_url"])
         existing[rid] = row
         if target.parent.resolve() != target.parent.absolute():
             raise ValueError("Unexpected linked directory in the intake repository.")
