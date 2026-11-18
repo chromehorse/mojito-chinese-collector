@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, quote, urljoin, urlsplit, urlunsplit
 
 
 MIIT_ATTACHMENT_PATH = re.compile(r"/cms_files/filemanager/\d+/attach/\d+/[0-9a-f]+\.pdf", re.I)
+EDITION_CHECKS = frozenset({"identity", "publication_date", "body", "required_text", "ending", "article_order", "document_number"})
 
 
 class _MiitPdfViewer(HTMLParser):
@@ -146,21 +147,26 @@ def historical_edition(entry, name):
             published = dates.pop() if len(dates) == 1 else None
         else:
             published = parse_date_zh(first_text(tree, selectors["date"]))
-        if (requested != url or published != edition["published"] or not title or not body
-                or edition["title_text"] not in title
-                or any(not any(marker in paragraph for paragraph in body) for marker in edition["body_markers"])
-                or not body[-1].endswith(edition["last_text"])):
-            raise AdapterError("Historical edition failed its publisher, date or content checks.")
+        if requested != url or not title or edition["title_text"] not in title:
+            raise AdapterError("identity")
+        if published != edition["published"]:
+            raise AdapterError("publication_date")
+        if not body:
+            raise AdapterError("body")
+        if any(not any(marker in paragraph for paragraph in body) for marker in edition["body_markers"]):
+            raise AdapterError("required_text")
+        if not body[-1].endswith(edition["last_text"]):
+            raise AdapterError("ending")
         if numbering := edition.get("numbered_articles"):
             numbers = re.findall(r"^第([一二三四五六七八九十]+)条", "\n".join(body), re.M)
             digits = "一二三四五六七八九"
             labels = [*digits, "十", *("十" + digit for digit in digits), "二十",
                       *("二十" + digit for digit in digits), "三十", *("三十" + digit for digit in digits)]
             if not 0 < numbering <= len(labels) or numbers != labels[:numbering]:
-                raise AdapterError("Historical edition has missing or out-of-order articles.")
+                raise AdapterError("article_order")
         document_number = edition.get("document_number")
         if document_number and document_number not in visible:
-            raise AdapterError("Historical edition does not carry its expected document number.")
+            raise AdapterError("document_number")
         return {"title": title, "date": published, "document_number": document_number, "body_paragraphs": body,
                 "attachments": collect_attachment_links(tree, requested, source["allowed_domains"])}
 
@@ -216,9 +222,13 @@ def collect(data, recipe_ids=(), cap=None, edition=None):
                          for entry in entries]
         finally:
             fetcher.close()
-        scraper_run.save_manifest(manifest, manifest_path)
         report = {"summaries": summaries, "deferred": deferred, "fetcher_stats": fetcher.stats,
                   "warnings": fetcher.warnings}
+        if edition and summaries[0]["parse_failures"]:
+            detail = manifest["failures"][-1]["detail"]
+            if detail in EDITION_CHECKS:
+                report["edition_failure"] = detail
+        scraper_run.save_manifest(manifest, manifest_path)
         (output / "run_stats.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
     return report
 
@@ -246,6 +256,7 @@ def print_collection_summary(data, recipe_ids, cap, edition=None):
         "deferred": len(report["deferred"]),
         "recipe_errors": sum(bool(row["error"]) for row in report["summaries"]),
         **{key: sum(row[key] for row in report["summaries"]) for key in counts},
+        **({"edition_failure": report["edition_failure"]} if "edition_failure" in report else {}),
     }))
     return int(failed)
 
