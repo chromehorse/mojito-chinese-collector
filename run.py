@@ -3,6 +3,7 @@ All paths resolve from this file; nothing depends on cwd."""
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -119,6 +120,12 @@ def process_recipe(entry, fetcher, manifest, cap=None, incremental=False, out_di
             continue
         summary["relevant"] += 1
         body_complete = not entry["recipe"].get("abstract_only", False)
+        # A policy announcement ending at its annex link is not the full policy.
+        if (entry["id"] == "nda_ai_policy" and parsed["title"].endswith("》印发")
+                and parsed["body_paragraphs"][-1] in {"附件：", "附件:"}
+                and not any(re.match(r"[一二三四五六七八九十]+、", paragraph)
+                            for paragraph in parsed["body_paragraphs"])):
+            body_complete = False
         meta, body_md = build_record(parsed, entry, url, r.fetched_at or utcnow().isoformat(),
                                      body_complete=body_complete)
         records.append((meta, body_md))
