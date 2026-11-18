@@ -6,7 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 
 CASES = {
@@ -14,6 +14,7 @@ CASES = {
         "parent": "https://www.cac.gov.cn/2026-05/22/c_1781191242686496.htm",
         "pdf": "https://www.cac.gov.cn/rootimages/uploadimg/1781191242772713/1781191242772713.pdf",
         "title": "人工智能应用伦理安全指引",
+        "opening": "人工智能应用伦理安全指引",
         "date": "2026-05-19",
         "pages": 9,
         "anchors": {1: "TC260-005", 2: "原则性、参考性技术文件", 3: "应用开发指引",
@@ -25,10 +26,11 @@ CASES = {
         "parent": "https://www.miit.gov.cn/jgsj/kjs/wjfb/art/2026/art_2995f16b28504ddcbb604e918eb15759.html",
         "pdf": "https://www.miit.gov.cn/cms_files/filemanager/1226211233/attach/20263/a532ba50febb46c9b5424d436e63de81.pdf",
         "title": "人工智能科技伦理审查与服务办法",
+        "opening": "第一章总则",
         "date": "2026-04-02",
         "pages": 12,
-        "anchors": {},
-        "cross_page": {},
+        "anchors": {1: "第一条", 12: "本清单将根据工作需要动态调整"},
+        "cross_page": {3: "主管部门监督。", 5: "系统的鲁棒性", 7: "人工智能科技活动清单"},
     },
 }
 
@@ -60,6 +62,12 @@ def fetch(case, quarantine):
         title = first_text(tree, "#con_title, h1") or ""
         attachments = {item["url"] for item in collect_attachment_links(tree, parent, [host])}
         attachments.update(miit_pdf_links(page.text, parent))
+        if host == "www.cac.gov.cn":
+            article = tree.css_first("#BodyLabel")
+            visible = article.text(separator="\n", strip=True) if article else ""
+            # This publisher prints the exact attachment URL next to its viewer link.
+            attachments.update(urljoin(parent, line.strip()) for line in visible.splitlines()
+                               if line.strip() in {url, url.removeprefix("https:")})
         if case["title"] not in title or url not in attachments:
             raise CaptureError("publisher_link_not_verified")
         if not fetcher._robots_allows(url):
@@ -95,7 +103,7 @@ def score_pages(case, pages):
     compact_pages = [compact(page) for page in pages]
     anchor_hits = sum(compact(text) in compact_pages[number - 1]
                       for number, text in case["anchors"].items())
-    title_in_document = compact(case["title"]) in "".join(compact_pages)
+    opening_found = compact(case["opening"]) in compact_pages[0]
     article_labels = re.findall(r"(?m)^\s*第([一二三四五六七八九十]+)\s*条", "\n".join(pages))
     cross_page_hits = 0
     for index, phrase in case["cross_page"].items():
@@ -103,8 +111,9 @@ def score_pages(case, pages):
         head = re.sub(r"^\s*[0-9IVX]+\s+", "", pages[index])
         cross_page_hits += compact(phrase) in compact(tail)[-140:] + compact(head)[:140]
     return {"nonempty_pages": sum(bool(text) for text in compact_pages),
-            "title_found": title_in_document, "anchor_hits": anchor_hits,
+            "opening_found": opening_found, "anchor_hits": anchor_hits,
             "cross_page_hits": cross_page_hits, "numbered_articles": len(article_labels),
+            "distinct_numbered_articles": len(set(article_labels)),
             "chinese_characters": sum(len(re.findall(r"[\u3400-\u9fff]", page)) for page in pages),
             "replacement_characters": sum(page.count("\ufffd") + page.count("\x00") for page in pages)}
 
