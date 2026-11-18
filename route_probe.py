@@ -53,6 +53,10 @@ CASES = {
          r"/xxgk/zcfb/tz/\d{6}/t\d+_\d+\.html$", ""),
         ("policy_control", "https://www.ndrc.gov.cn/xxgk/zcfb/tz/202602/t20260210_1403680.html", "", "加强组织保障"),
     ),
+    "approved_reprints": (
+        ("moe_public_copy", "https://sjj.hunan.gov.cn/sjj/zwgk/zcfg/gjfg/202606/t20260608_33996235.html", "", "人工智能通识"),
+        ("ndrc_public_copy", "https://www.jiangmen.gov.cn/bmpd/jmsfzhggj/ztlm/myjj/xwdt/content/post_3463758.html", "", "加强组织保障"),
+    ),
 }
 BODY = ("div.TRS_Editor", ".trs_editor_view", "#UCAP-CONTENT", "#ozoom", "#articleContent",
         "#article-content", "#article", "#content", ".content", ".article-content", ".article_content",
