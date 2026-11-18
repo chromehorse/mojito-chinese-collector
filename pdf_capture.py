@@ -2,10 +2,12 @@
 
 import argparse
 from contextlib import redirect_stderr, redirect_stdout
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
 import re
+import unicodedata
 from urllib.parse import urljoin, urlsplit
 
 
@@ -16,7 +18,11 @@ CASES = {
         "title": "人工智能应用伦理安全指引",
         "opening": "人工智能应用伦理安全指引",
         "date": "2026-05-19",
+        "document_number": "TC260-005",
+        "publisher": "全国网络安全标准化技术委员会",
         "pages": 9,
+        "page_labels": (None, "I", "II", "III", "1", "2", "3", "4", "5"),
+        "ending": "帮助建设良性人工智能生态。",
         "anchors": {1: "TC260-005", 2: "原则性、参考性技术文件", 3: "应用开发指引",
                     5: "术语和定义", 6: "人类主导权影响", 7: "敏捷共治", 8: "服务提供指引",
                     9: "帮助建设良性人工智能生态"},
@@ -118,7 +124,95 @@ def score_pages(case, pages):
             "replacement_characters": sum(page.count("\ufffd") + page.count("\x00") for page in pages)}
 
 
-def extract(case, quarantine):
+def without_folio(page, label):
+    lines = page.strip("\n").splitlines()
+    boundaries = [i for i, row in enumerate(lines) if row.strip()][:1]
+    if boundaries:
+        last = len(lines) - 1 - next(i for i, row in enumerate(reversed(lines)) if row.strip())
+        boundaries = list(dict.fromkeys([boundaries[0], last]))
+    if label is not None:
+        matches = [i for i in boundaries if unicodedata.normalize("NFKC", lines[i].strip()) == label]
+        if len(matches) != 1:
+            raise CaptureError("folio_not_verified")
+        lines.pop(matches[0])
+    return "\n".join(lines)
+
+
+_BLOCK_START = re.compile(r"^(?:\d+(?:\.\d+)*(?:\s+|$)|[a-z]\s*[）)]|GB/T\s+\d+|\[来源[：:])")
+_HAN = re.compile(r"[\u3400-\u9fff\u3000-\u303f\uff00-\uffef]")
+
+
+def join_line(left, right):
+    space = "" if _HAN.match(left[-1]) or _HAN.match(right[0]) else " "
+    return left + space + right
+
+
+def page_blocks(page):
+    blocks = []
+    boundary = True
+    for line in page.splitlines():
+        line = " ".join(line.split())
+        if not line:
+            boundary = True
+        elif boundary or _BLOCK_START.match(line):
+            blocks.append(line)
+            boundary = False
+        else:
+            blocks[-1] = join_line(blocks[-1], line)
+    return blocks
+
+
+def normalize(case, modes):
+    plain, layout = ([without_folio(text, label) for text, label in zip(modes[mode], case["page_labels"], strict=True)]
+                     for mode in ("plain", "layout"))
+    if list(map(compact, plain)) != list(map(compact, layout)):
+        raise CaptureError("text_order_disagrees")
+    paragraphs, spans = [], []
+    for number, page in enumerate(layout, 1):
+        blocks = page_blocks(page)
+        if not blocks:
+            raise CaptureError("empty_page")
+        if phrase := case["cross_page"].get(number - 1):
+            joined = join_line(paragraphs[-1], blocks.pop(0))
+            if compact(phrase) not in compact(joined):
+                raise CaptureError("page_continuation_not_verified")
+            paragraphs[-1] = joined
+            spans[-1] = (spans[-1][0], number)
+        paragraphs.extend(blocks)
+        spans.extend([(number, number)] * len(blocks))
+    if (compact("".join(paragraphs)) != compact("".join(plain))
+            or not compact(paragraphs[-1]).endswith(compact(case["ending"]))
+            or compact(case["date"]) not in compact(layout[0])):
+        raise CaptureError("normalized_text_not_verified")
+    return paragraphs, spans
+
+
+def write_capture(case, path, output, paragraphs, spans):
+    from run import load_manifest, save_manifest
+    from scraper.fetcher import utcnow
+    from scraper.normalize import build_record, to_markdown
+    from scraper.registry import load_registry
+
+    entry = next(e for e in load_registry() if e["id"] == "cac_regs")
+    meta, text = build_record({"title": case["title"] + " 1.0", "date": case["date"],
+                               "body_paragraphs": paragraphs, "document_number": case["document_number"],
+                               "issuing_institution": case["publisher"]},
+                              entry, case["pdf"], utcnow().isoformat())
+    meta.update(source_genre="guidance", attachment_parent=case["parent"],
+                attachment_sha256=sha256(path.read_bytes()).hexdigest(),
+                pdf_page_count=case["pages"], pdf_page_spans=",".join(f"{start}-{end}" for start, end in spans))
+    normalized = output / "_normalized"
+    normalized.mkdir(parents=True, exist_ok=True)
+    (normalized / (meta["record_id"] + ".md")).write_text(to_markdown(meta, text), encoding="utf-8")
+    manifest_path = output / "manifest.json"
+    manifest = load_manifest(manifest_path)
+    manifest["records"][meta["record_id"]] = {key: meta[key] for key in (
+        "source", "canonical_url", "title_zh", "published", "content_hash", "docnum_hash",
+        "republication_of", "body_complete", "fetched")}
+    save_manifest(manifest, manifest_path)
+
+
+def extract(case, quarantine, output=None):
     from pypdf import PdfReader
 
     path = quarantine / "attachment.pdf"
@@ -128,14 +222,26 @@ def extract(case, quarantine):
             raise CaptureError("encrypted_pdf")
         if len(reader.pages) != case["pages"]:
             raise CaptureError("unexpected_page_count")
-        modes = {}
+        text_by_mode = {}
         for mode in ("plain", "layout"):
             pages = [page.extract_text(extraction_mode=mode) or "" for page in reader.pages]
             if sum(len(page.encode("utf-8")) for page in pages) > 3 * 1024 * 1024:
                 raise CaptureError("text_size_cap")
-            modes[mode] = score_pages(case, pages)
+            text_by_mode[mode] = pages
+    modes = {mode: score_pages(case, pages) for mode, pages in text_by_mode.items()}
+    staged = {}
+    if output is not None:
+        if "page_labels" not in case or any(
+                m["nonempty_pages"] != case["pages"] or not m["opening_found"] or m["replacement_characters"]
+                or m["anchor_hits"] != len(case["anchors"]) or m["cross_page_hits"] != len(case["cross_page"])
+                for m in modes.values()):
+            raise CaptureError("edition_quality_gate")
+        paragraphs, spans = normalize(case, text_by_mode)
+        write_capture(case, path, output, paragraphs, spans)
+        staged = {"staged": 1, "paragraphs": len(paragraphs),
+                  "cross_page_paragraphs": sum(first != last for first, last in spans)}
     return {"status": "measured", "pages": case["pages"], "expected_anchors": len(case["anchors"]),
-            "expected_cross_page": len(case["cross_page"]), "modes": modes}
+            "expected_cross_page": len(case["cross_page"]), "modes": modes, **staged}
 
 
 def main():
@@ -143,11 +249,13 @@ def main():
     parser.add_argument("phase", choices=("fetch", "extract"))
     parser.add_argument("case", choices=tuple(CASES))
     parser.add_argument("quarantine", type=Path)
+    parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     try:
         with open(os.devnull, "w") as sink, redirect_stdout(sink), redirect_stderr(sink):
-            run = fetch if args.phase == "fetch" else extract
-            result = run(CASES[args.case], args.quarantine)
+            case = CASES[args.case]
+            result = (fetch(case, args.quarantine) if args.phase == "fetch"
+                      else extract(case, args.quarantine, args.output))
         print(json.dumps(result), flush=True)
     except Exception as error:
         print(json.dumps({"status": "pdf_capture_failed", "phase": args.phase,
