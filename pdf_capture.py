@@ -360,27 +360,35 @@ def shanghai_annex(case, coordinates, plain, layout):
         cells[cell].append(fragment)
     texts = {cell: positioned_text(items, separate_lines=cell[1] == 4) for cell, items in cells.items()}
     normalized = {cell: compact(text) for cell, text in texts.items()}
-    raw_caption = positioned_text(outside)
-    caption, folios = re.subn(r"[—–-]\s*5\s*[—–-]", "", raw_caption)
-    if folios != 1 or compact(caption) != case["annex_title"]:
-        raise CaptureError("annex_caption_or_folio")
-    if tuple(normalized[(0, col)] for col in (0, 1, 3, 4)) != _SHANGHAI_HEADERS:
-        raise CaptureError("annex_printed_headers")
-    if any(not text for text in normalized.values()):
-        raise CaptureError("annex_cell_text_disagrees")
+    caption = case["annex_title"]
+    outside_inventory = Counter(compact(positioned_text(outside)))
+    caption_verified = (compact(plain).startswith(caption) and caption in compact(layout)
+                        and any(outside_inventory == Counter(caption + dash + "5" + dash) for dash in "—–-"))
+    headers_verified = tuple(normalized[(0, col)] for col in (0, 1, 3, 4)) == _SHANGHAI_HEADERS
     # A PDF glyph's advance can extend past the drawn cell edge. Assign its
     # origin to the physical cell, then verify the full cell order against the
     # independent content-stream reading.
-    if compact(caption) + "".join(normalized.values()) != compact(plain):
-        raise CaptureError(f"annex_cell_order_disagrees {advance_crossings} calculated advance crossings")
-    inventory = Counter(compact(caption) + "".join(normalized.values()))
-    if inventory != Counter(compact(plain)) or inventory != Counter(compact(layout)):
-        raise CaptureError("annex_character_loss")
-    if (normalized[(1, 0)] != "制造业智能化发展"
-            or normalized[(1, 1)] != "支持“AI+制造”样板企业梯度培育"
-            or not normalized[(1, 3)].endswith("经评估后给予分档支持。")
-            or "2025年度1月1日-12月31日" not in normalized[(4, 3)]):
-        raise CaptureError("annex_scope_anchors")
+    cell_order = caption + "".join(normalized.values())
+    inventory = Counter(cell_order)
+    layout_inventory = Counter(compact(layout))
+    plain_inventory = Counter(compact(plain))
+    anchors_verified = (normalized[(1, 0)] == "制造业智能化发展"
+                        and normalized[(1, 1)] == "支持“AI+制造”样板企业梯度培育"
+                        and normalized[(1, 3)].endswith("经评估后给予分档支持。")
+                        and "2025年度1月1日-12月31日" in normalized[(4, 3)])
+    checks = {
+        "caption": caption_verified, "headers": headers_verified, "all_cells": all(normalized.values()),
+        "stream_order": cell_order == compact(plain), "inventory": inventory == plain_inventory == layout_inventory,
+        "scope_anchors": anchors_verified,
+    }
+    if not all(checks.values()):
+        failure = [name for name, passed in checks.items() if not passed]
+        position = next((i for i, (a, b) in enumerate(zip(cell_order, compact(plain))) if a != b), None)
+        raise CaptureError(f"annex_checks {failure} first_order_difference={position} "
+                           f"missing_characters={(plain_inventory - inventory).total()} "
+                           f"extra_characters={(inventory - plain_inventory).total()} "
+                           f"outside_characters={outside_inventory.total()} "
+                           f"cell_lengths={[len(value) for value in normalized.values()]}")
     paragraphs = [case["annex_title"], " | ".join(_SHANGHAI_HEADERS), texts[(1, 0)], texts[(1, 1)]]
     paragraphs.extend(" | ".join(texts[(row, col)] for col in (direction, 3, 4))
                       for row, direction in ((1, 2), (2, 2), (3, 1), (4, 1)))
