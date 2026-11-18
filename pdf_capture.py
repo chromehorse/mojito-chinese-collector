@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 from tempfile import TemporaryDirectory
+from traceback import extract_tb
 import unicodedata
 from urllib.parse import urljoin, urlsplit
 
@@ -363,8 +364,12 @@ def main():
                       else extract(case, args.quarantine, args.output))
         print(json.dumps(result), flush=True)
     except Exception as error:
-        print(json.dumps({"status": "pdf_capture_failed", "phase": args.phase,
-                          "reason": str(error) if isinstance(error, CaptureError) else type(error).__name__}))
+        detail = {"status": "pdf_capture_failed", "phase": args.phase,
+                  "reason": str(error) if isinstance(error, CaptureError) else type(error).__name__}
+        if not isinstance(error, CaptureError):
+            detail["frames"] = [(Path(frame.filename).name, frame.name, frame.lineno)
+                                for frame in extract_tb(error.__traceback__)[-4:]]
+        print(json.dumps(detail))
         return 1
     return 0
 
