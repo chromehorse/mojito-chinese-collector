@@ -330,6 +330,28 @@ def policy_body_shape(fetcher, host):
     directives = re.findall(r"^\s*(user-agent|allow|disallow|sitemap|crawl-delay)\s*:", text, re.I | re.M)
     result.update(utf8=True, looks_html=html, recognized_directive_lines=len(directives),
                   plaintext_policy_candidate=not html and any(key.lower() == "user-agent" for key in directives))
+    # Classify publisher error messages without logging their contents or IDs.
+    markers = {
+        "not_found": ("not found", "不存在", "未找到"),
+        "access_denied": ("access denied", "forbidden", "拒绝访问", "无权访问", "禁止访问"),
+        "human_verification": ("captcha", "human verification", "人机", "安全验证"),
+        "rate_limited": ("too many requests", "请求过于频繁", "访问过于频繁"),
+    }
+    lowered = text.casefold()
+    result["error_markers"] = [kind for kind, terms in markers.items() if any(term in lowered for term in terms)]
+    result["markup_present"] = bool(re.search(r"</?[a-z][^>]*>", text, re.I))
+    try:
+        parsed = json.loads(text)
+    except (ValueError, TypeError):
+        parsed = None
+    result["json_object"] = isinstance(parsed, dict)
+    if isinstance(parsed, dict):
+        for key in ("code", "status", "statusCode"):
+            value = parsed.get(key)
+            if (type(value) is int and -99999 <= value <= 99999
+                    or isinstance(value, str) and re.fullmatch(r"-?\d{1,5}", value)):
+                result["json_status_code"] = int(value)
+                break
     return result
 
 
