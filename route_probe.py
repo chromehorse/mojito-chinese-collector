@@ -285,8 +285,52 @@ def probe_cac_rosters(fetcher):
     return results
 
 
+class PolicyTransport(httpx.BaseTransport):
+    """Observe policy response metadata without retaining or printing its body."""
+
+    def __init__(self):
+        self.transport = httpx.HTTPTransport(trust_env=False)
+        self.responses = []
+
+    def handle_request(self, request):
+        try:
+            response = self.transport.handle_request(request)
+        except httpx.HTTPError as error:
+            self.responses.append({"status": 0, "transport": type(error).__name__})
+            raise
+        mime = response.headers.get("content-type", "").partition(";")[0].strip().lower()
+        self.responses.append({"status": response.status_code,
+                               "mime": mime if MEDIA_TYPE.fullmatch(mime) else "unrecognized",
+                               "redirect": response.is_redirect})
+        return response
+
+    def close(self):
+        self.transport.close()
+
+
+def probe_cnki_policy(case):
+    listing = CASES[case][0][1]
+    host = urlsplit(listing).hostname
+    transport = PolicyTransport()
+    with open(os.devnull, "w") as sink, redirect_stdout(sink), redirect_stderr(sink):
+        fetcher = Fetcher(cache_dir=Path("/tmp/publisher-probe"), transport=transport,
+                          strict_html_hosts={host: {}})
+        try:
+            allowed = fetcher._robots_allows(listing)
+            policy = fetcher._robots.get(host)
+            state = policy if isinstance(policy, str) else "parsed-directives"
+        finally:
+            fetcher.close()
+    return {"case": case, "listing_policy_allowed": allowed, "policy_state": state,
+            "policy_responses": transport.responses, "article_requests": 0}
+
+
 def main():
     case = sys.argv[1]
+    if case == "cnki_policy":
+        for publisher in ("cnki_zrbz", "cnki_kxbz"):
+            print(json.dumps(probe_cnki_policy(publisher)), flush=True)
+        return 0
     archived_routes = {
         "wayback_qiushi": (QIUSHI_FIRST_ISSUE, QIUSHI_SNAPSHOT, compare_qiushi_archive),
         "wayback_qiushi_article": (QIUSHI_INTERVIEW, QIUSHI_INTERVIEW_SNAPSHOT, compare_qiushi_article),
