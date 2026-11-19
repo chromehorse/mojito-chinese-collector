@@ -308,6 +308,31 @@ class PolicyTransport(httpx.BaseTransport):
         self.transport.close()
 
 
+def policy_body_shape(fetcher, host):
+    """Classify a bounded policy response, never log or execute its contents."""
+    url = f"https://{host}/robots.txt"
+    fetcher._polite_wait(url)
+    with fetcher._client.stream("GET", url) as response:
+        if response.status_code != 200:
+            return {"status": response.status_code, "changed_response": True}
+        mime = response.headers.get("content-type", "").partition(";")[0].strip().lower()
+        body = bytearray()
+        for chunk in response.iter_bytes(chunk_size=16384):
+            body.extend(chunk)
+            if len(body) > 500 * 1024:
+                return {"oversized": True}
+    result = {"bytes": len(body), "mime": mime if MEDIA_TYPE.fullmatch(mime) else "unrecognized"}
+    try:
+        text = body.decode("utf-8-sig", errors="strict")
+    except UnicodeError:
+        return {**result, "utf8": False}
+    html = bool(re.search(r"<\s*(?:!doctype\s+html|html|head|body|script)\b", text, re.I))
+    directives = re.findall(r"^\s*(user-agent|allow|disallow|sitemap|crawl-delay)\s*:", text, re.I | re.M)
+    result.update(utf8=True, looks_html=html, recognized_directive_lines=len(directives),
+                  plaintext_policy_candidate=not html and any(key.lower() == "user-agent" for key in directives))
+    return result
+
+
 def probe_cnki_policy(case):
     listing = CASES[case][0][1]
     host = urlsplit(listing).hostname
@@ -319,10 +344,13 @@ def probe_cnki_policy(case):
             allowed = fetcher._robots_allows(listing)
             policy = fetcher._robots.get(host)
             state = policy if isinstance(policy, str) else "parsed-directives"
+            shape = (policy_body_shape(fetcher, host) if not allowed and transport.responses
+                     and transport.responses[-1].get("status") == 200
+                     and transport.responses[-1].get("mime") == "text/html" else None)
         finally:
             fetcher.close()
     return {"case": case, "listing_policy_allowed": allowed, "policy_state": state,
-            "policy_responses": transport.responses, "article_requests": 0}
+            "policy_responses": transport.responses, "policy_body_shape": shape, "article_requests": 0}
 
 
 def main():
