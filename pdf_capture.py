@@ -149,15 +149,18 @@ CASES = {
         "parent": "https://www.miit.gov.cn/jgsj/kjs/wjfb/art/2026/art_735cc3b48391470ea3baec587e526d5f.html",
         "pdf": "https://www.miit.gov.cn/cms_files/filemanager/1226211233/attach/20267/9d62254ba76243e8b795af58c4c18e6a.pdf",
         "title": "工业和信息化部办公厅关于印发2025年人工智能应用典型案例名单的通知",
+        "record_title": "2025年人工智能应用典型案例名单",
+        "source": "miit_kjs",
+        "source_genre": "institutional-commentary",
+        "date": "2026-07-15",
+        "document_number": "工信厅科函〔2026〕340号",
+        "publisher": "工业和信息化部办公厅",
         "pages": 16,
         "pdf_sha256": "aee55ce5ab838efb80df48ab1c0c1906b309831d99735eff732865337caaf4eb",
         "table_boundaries": (17, 17, 19, 20, 20, 22, 23, 21, 21, 19, 19, 18, 21, 22, 23, 6),
         "expected_case_rows": 285,
         "split_applicant": (7, "南京南智先进光电集成技术研究院", "有限公司"),
         "verify_case_grid": True,
-        "probe_only": True,
-        "inspect_all_pages": True,
-        "inspect_grid": True,
     },
     "shanghai_manufacturing_2026": {
         "parent": "https://www.sheitc.sh.gov.cn/cyfz/20260112/11e3168ff89a4eeea2b1afd193c19418.html",
@@ -245,6 +248,10 @@ def fetch(case, quarantine):
                                    if line.strip() in {url, url.removeprefix("https:")})
             if case["title"] not in title or url not in attachments:
                 raise CaptureError("publisher_link_not_verified")
+        if case.get("verify_case_grid"):
+            visible = compact(tree.body.text(separator=" ", strip=True))
+            if case["document_number"] not in visible or case["date"] not in visible:
+                raise CaptureError("applications_parent_edition")
         if selector := case.get("prose_selector"):
             paragraphs = complete_body_paragraphs(tree, selector)
             markers = [i for i, text in enumerate(paragraphs) if compact(text) == case["annex_intro"]]
@@ -870,12 +877,13 @@ def application_table_page(xs, ys, lines, fragments):
             positioned_text(after, separate_lines=True))
 
 
-def read_application_cases(case, reader, path):
+def read_application_cases(case, reader, path, output):
     pages = independent_table_words(path)
     if len(pages) != case["pages"] or len(reader.pages) != case["pages"]:
         raise CaptureError("applications_page_count")
     counts = []
-    cases = []
+    entries = []
+    last_case = None
     split_page, applicant_start, applicant_end = case["split_applicant"]
     joined_case = False
     headers = ("案例名称", "申报单位", "推荐单位")
@@ -893,6 +901,12 @@ def read_application_cases(case, reader, path):
         if (not plain or "\ufffd" in plain or "\x00" in plain or inventory != Counter(reconstructed)
                 or inventory != Counter(compact("".join(word for _, _, _, word in other)))):
             raise CaptureError(f"applications_character_inventory_{number}")
+        outside = compact(before + after)
+        caption = "附件" + compact(case["record_title"]) if number == 1 else ""
+        if outside not in (caption + str(number), str(number) + caption):
+            raise CaptureError(f"applications_caption_or_folio_{number}")
+        if caption:
+            entries.extend([(["附件"], 1, 1), ([case["record_title"]], 1, 1)])
         data_rows = heading_rows = empty_rows = 0
         for index, (row, check) in enumerate(zip(rows, independent, strict=True), 1):
             texts = tuple(map(compact, row))
@@ -902,17 +916,23 @@ def read_application_cases(case, reader, path):
                 empty_rows += 1
             elif len(texts) == 1 or texts == headers:
                 heading_rows += 1
+                entries.append((row, number, number))
             elif number == split_page and index == 1:
-                prior_page, prior_index, prior_text = cases[-1]
+                if last_case is None:
+                    raise CaptureError("applications_split_applicant_not_verified")
+                prior_page, prior_index = last_case
+                prior_text, start, _ = entries[-1]
                 if (texts != ("", applicant_end, "") or prior_page != number - 1
                         or prior_index != case["table_boundaries"][number - 2] - 1
                         or compact(prior_text[1]) != applicant_start):
                     raise CaptureError("applications_split_applicant_not_verified")
                 prior_text[1] = join_line(prior_text[1], row[1])
+                entries[-1] = prior_text, start, number
                 joined_case = True
             elif all(texts) and all(" | " not in cell for cell in row):
                 data_rows += 1
-                cases.append((number, index, row))
+                entries.append((row, number, number))
+                last_case = number, index
             else:
                 raise CaptureError(f"applications_incomplete_row_{number}_{index}")
         if number == 1 and (compact("2025年人工智能应用典型案例名单") not in compact(before)
@@ -922,8 +942,15 @@ def read_application_cases(case, reader, path):
     total = sum(row["rows"] for row in counts)
     if total != case["expected_case_rows"] or not joined_case:
         raise CaptureError(f"applications_case_count_{total}")
-    return {"status": "applications_grid_verified", "pages": len(counts), "case_rows": total, "page_counts": counts,
-            "joined_row_pages": [split_page - 1, split_page], "attachment_sha256": case["pdf_sha256"]}
+    summary = {"status": "applications_grid_verified", "pages": len(counts), "case_rows": total, "page_counts": counts,
+               "joined_row_pages": [split_page - 1, split_page], "attachment_sha256": case["pdf_sha256"]}
+    if output is not None:
+        paragraphs = [" | ".join(row) for row, _, _ in entries]
+        spans = [(start, end) for _, start, end in entries]
+        metadata = write_capture(case, path, output, paragraphs, spans)
+        summary.update(staged=1, content_hash=metadata["content_hash"], paragraphs=len(paragraphs),
+                       paragraphs_by_page=dict(Counter(start for start, _ in spans)))
+    return summary
 
 
 def inspect_attachment(case, reader, path, output=None):
@@ -946,11 +973,6 @@ def inspect_attachment(case, reader, path, output=None):
                        "same_character_order": compact(plain) == compact(layout),
                        "chinese_characters": len(re.findall(r"[\u3400-\u9fff]", plain)),
                        "replacement_characters": plain.count("\ufffd") + layout.count("\ufffd")}
-        if case.get("inspect_grid"):
-            xs, ys, lines, _, diagnostics = annex_coordinates(page)
-            spans = Counter(axis for axis, *_ in lines)
-            measurement["grid"] = {"vertical_boundaries": len(xs), "horizontal_boundaries": len(ys),
-                                   "segments_by_axis": dict(spans), "text_blocks": diagnostics["block_count"]}
         if other is not None:
             comparison = compact(other[number])
             missing = Counter(compact(plain)) - Counter(comparison)
@@ -1007,11 +1029,11 @@ def extract(case, quarantine, output=None):
         reader = PdfReader(stream, strict=True)
         if reader.is_encrypted:
             raise CaptureError("encrypted_pdf")
+        if case.get("verify_case_grid"):
+            return read_application_cases(case, reader, path, output)
         if case.get("probe_only"):
             if output is not None and not case.get("inspection_capture"):
                 raise CaptureError("inspection_not_capture")
-            if case.get("verify_case_grid"):
-                return read_application_cases(case, reader, path)
             return inspect_attachment(case, reader, path, output)
         if "roster_month" in case:
             measurement, paragraphs, spans = read_roster(case, reader)
