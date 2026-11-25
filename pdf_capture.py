@@ -35,13 +35,20 @@ CASES = {
     },
     "xjtu_cross_cultural_ai": {
         "pdf": "https://marx.xjtu.edu.cn/__local/2/85/4A/20695F5E85046842C4A8A8939C7_AD4057CB_12A95D.pdf",
-        "record_title": "跨文化人工智能体的伦理设计何以可能?",
-        "author": "王亮",
+        "parent": "https://zrbz.cbpt.cnki.net/portal/journal/portal/client/paper/186c940199a0dff7ebc0698c7c38681a",
+        "record_title": "跨文化人工智能体的伦理设计何以可能?——基于设计师伦理责任意识的培养",
+        "author": "王亮，马紫依",
         "original_citation": "10.19484/j.cnki.1000-8934.2024.07.006",
+        "document_number": "10.19484/j.cnki.1000-8934.2024.07.006",
+        "source": "zrbzf_yanjiu",
+        "source_genre": "signed-essay",
+        "date": "2024-07-18",
+        "publisher": "自然辩证法研究",
         "institutional_copy": True,
         "pages": 8,
         "pdf_sha256": "178545af2a7a7309c6dd00d01bd95f0b414882a028a343d9ddda9a177da1a3f5",
-        "probe_only": True,
+        "column_vertical_bounds": ((350, 690), (70, 767), (70, 767), (70, 767),
+                                   (70, 767), (70, 767), (70, 767), (70, 460)),
         "inspect_all_pages": True,
     },
     "ndrc_plan_2026": {
@@ -707,7 +714,7 @@ def write_capture(case, path, output, paragraphs, spans, *, body_complete=True):
     entry = next(e for e in load_registry() if e["id"] == case["source"])
     meta, text = build_record({"title": case.get("record_title", case["title"]), "date": case["date"],
                                "body_paragraphs": paragraphs, "document_number": case["document_number"],
-                               "issuing_institution": case["publisher"]},
+                               "issuing_institution": case["publisher"], "author": case.get("author")},
                               entry, case["pdf"], utcnow().isoformat(), body_complete=body_complete)
     if snapshot := edition_snapshot({"url": case["pdf"], "archive_timestamp": case.get("archive_timestamp")}):
         meta["archive_snapshot"] = snapshot
@@ -917,18 +924,115 @@ def journal_reading_order(path):
     if text_pages and not text_pages[-1].strip():
         text_pages.pop()
     xml_pages = []
-    page_shapes = []
+    page_blocks = []
     for page in ElementTree.fromstring(layouts[1]).iterfind(".//{*}page"):
         blocks = list(page.iterfind(".//{*}block"))
         lines = [list(block.iterfind("{*}line")) for block in blocks]
-        xml_pages.append("\n".join(" ".join(word.text or "" for word in line.iterfind("{*}word"))
-                                   for block_lines in lines for line in block_lines))
-        page_shapes.append([
-            [round(float(block.attrib["xMin"])), round(float(block.attrib["xMax"])),
-             round(float(block.attrib["yMin"])), round(float(block.attrib["yMax"])), len(block_lines)]
-            for block, block_lines in zip(blocks, lines, strict=True)
-        ])
-    return text_pages, xml_pages, page_shapes
+        parsed = []
+        for block_lines in lines:
+            for line in block_lines:
+                words = [(float(word.attrib["xMin"]), float(word.attrib["xMax"]), word.text or "")
+                         for word in line.iterfind("{*}word")]
+                parsed.append((float(line.attrib["yMin"]), tuple(words)))
+        xml_pages.append("\n".join(" ".join(word[2] for word in words) for _, words in parsed))
+        page_blocks.append(parsed)
+    return text_pages, xml_pages, page_blocks
+
+
+def ordered_journal_lines(lines, page, top, bottom):
+    regions = [[], [], [], []]
+    for y, words in lines:
+        if not words:
+            continue
+        if y < top:
+            region = 0
+        elif y >= bottom:
+            region = 3
+        elif max(right for _, right, _ in words) < 295:
+            region = 1
+        elif min(left for left, _, _ in words) > 300:
+            region = 2
+        else:
+            left = min(left for left, _, _ in words)
+            right = max(right for _, right, _ in words)
+            raise CaptureError(f"journal_column_boundary_{page}_{y:.1f}_{left:.1f}_{right:.1f}")
+        regions[region].extend((-y, left, right, word) for left, right, word in words)
+    rendered = []
+    for index, fragments in enumerate(regions):
+        if not fragments:
+            continue
+        if index in (0, 3):
+            rendered.append(positioned_text(fragments, separate_lines=True))
+            continue
+        clusters = []
+        for y, left, right, word in sorted(fragments, key=lambda entry: (-entry[0], entry[1])):
+            if not clusters or clusters[-1][0][0] - y > 4:
+                clusters.append([])
+            clusters[-1].append((y, left, right, word))
+        margin = 57 if index == 1 else 309
+        paragraphs = []
+        for cluster in clusters:
+            left = min(fragment[1] for fragment in cluster)
+            line = positioned_text([(0, x, end, word) for _, x, end, word in cluster])
+            if not line:
+                continue
+            line_label = unicodedata.normalize("NFKC", line)
+            number = re.match(r"^(?:\[\d+\]|[一二三四五六七八九][、.]|\d+[.．])", line_label)
+            if not paragraphs or left >= margin + 12 or number or compact(line_label) == "参考文献":
+                paragraphs.append(line)
+            else:
+                paragraphs[-1] = join_line(paragraphs[-1], line)
+        rendered.extend(paragraphs)
+    return rendered
+
+
+def read_institutional_journal(case, reader, path, output):
+    physical, images = independent_pdf_text(path)
+    original_order, positioned, pages = journal_reading_order(path)
+    if len(reader.pages) != len(physical) or len(pages) != case["pages"] or images:
+        raise CaptureError("journal_page_extent")
+    paragraphs, spans, references = [], [], []
+    reading_references = False
+    for number, (page, rows, bounds, first, layout) in enumerate(zip(
+            reader.pages, pages, case["column_vertical_bounds"], original_order, positioned, strict=True), 1):
+        blocks = ordered_journal_lines(rows, number, *bounds)
+        reconstructed = compact("".join(blocks))
+        native = compact(page.extract_text() or "")
+        if (not native or any(char in reconstructed for char in ("\ufffd", "\x00"))
+                or Counter(native) != Counter(reconstructed)
+                or compact(first) != compact(layout)):
+            raise CaptureError(f"journal_page_fidelity_{number}")
+        for text in blocks:
+            normalized = unicodedata.normalize("NFKC", compact(text))
+            if number == 7 and normalized == "参考文献":
+                reading_references = True
+            if reading_references and (match := re.match(r"^\[(\d{1,2})\]", normalized)):
+                references.append(int(match[1]))
+        paragraphs.extend(blocks)
+        spans.extend([(number, number)] * len(blocks))
+    first = unicodedata.normalize("NFKC", compact(physical[0]))
+    first_order = unicodedata.normalize("NFKC", compact("".join(block for i, block in enumerate(paragraphs)
+                                                            if spans[i][0] == 1)))
+    opening, section = (first_order.find(marker) for marker in ("2023年11月", "一、设计师的外在伦理约束"))
+    final = unicodedata.normalize("NFKC", compact("".join(block for i, block in enumerate(paragraphs)
+                                                      if spans[i][0] == case["pages"])))
+    checks = {
+        "doi": case["original_citation"] in first,
+        "authors": all(name in first for name in case["author"].split("，")),
+        "title": unicodedata.normalize("NFKC", case["record_title"].split("?")[0]) in first,
+        "opening": 0 <= opening < section,
+        "end": "本文责任编辑" in final,
+    }
+    if not all(checks.values()) or references != list(range(1, 40)):
+        failed = "_".join(key for key, valid in checks.items() if not valid)
+        raise CaptureError(f"journal_article_boundaries_{failed}_refs_" + "_".join(map(str, references)))
+    summary = {"status": "journal_edition_verified", "pages": case["pages"], "references": len(references),
+               "paragraphs": len(paragraphs), "attachment_sha256": case["pdf_sha256"],
+               "paragraphs_by_page": dict(Counter(start for start, _ in spans))}
+    if output is not None:
+        meta = write_capture(case, path, output, paragraphs, spans)
+        summary.update(staged=1, content_hash=meta["content_hash"])
+    return summary
 
 
 def application_table_page(xs, ys, lines, fragments):
@@ -1102,25 +1206,6 @@ def inspect_attachment(case, reader, path, output=None):
         staged["original_title_match"] = case["record_title"] in first_page
         staged["original_author_match"] = case["author"] in first_page
         staged["original_citation_match"] = unicodedata.normalize("NFKC", citation) in first_page
-    if case.get("institutional_copy"):
-        staged["normalized_inventory_by_page"] = [
-            Counter(unicodedata.normalize("NFKC", compact(page.extract_text() or "")))
-            == Counter(unicodedata.normalize("NFKC", compact(candidate)))
-            for page, candidate in zip(reader.pages, other, strict=True)
-        ]
-        ordered, positioned, shapes = journal_reading_order(path)
-        if len(ordered) != len(positioned) or len(ordered) != len(other):
-            raise CaptureError("journal_reading_order_pages")
-        staged["positioned_order_matches"] = [compact(a) == compact(b)
-                                              for a, b in zip(ordered, positioned, strict=True)]
-        staged["ordered_character_inventory_matches"] = [Counter(compact(a)) == Counter(compact(b))
-                                                         for a, b in zip(ordered, other, strict=True)]
-        staged["printed_reference_numbers"] = [
-            [int(number) for number in re.findall(r"(?m)^\s*\[\s*(\d{1,2})\s*\]",
-                                                 unicodedata.normalize("NFKC", page))]
-            for page in ordered
-        ]
-        staged["column_blocks"] = shapes
     return {"status": "attachment_measured", "pages": len(reader.pages), "samples": measurements,
             "column_labels": dict(Counter(label for page in text for label in re.findall(r"专栏(\d+)", page))),
             "figure_labels": dict(Counter(label for page in text for label in re.findall(r"图(\d+)", page))),
@@ -1139,6 +1224,8 @@ def extract(case, quarantine, output=None):
         reader = PdfReader(stream, strict=not case.get("institutional_copy", False))
         if reader.is_encrypted:
             raise CaptureError("encrypted_pdf")
+        if case.get("institutional_copy"):
+            return read_institutional_journal(case, reader, path, output)
         if case.get("verify_case_grid"):
             return read_application_cases(case, reader, path, output)
         if case.get("probe_only"):

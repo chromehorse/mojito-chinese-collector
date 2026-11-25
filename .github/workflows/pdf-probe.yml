@@ -56,7 +56,7 @@ jobs:
         run: |
           install -d -m 700 "$RUNNER_TEMP/mojito-pdf-text"
           stage=()
-          if [[ "$EDITION" == tc260_005 || "$EDITION" == miit_ai_applications_2025 || "$EDITION" == shanghai_manufacturing_2026 || "$EDITION" == ndrc_plan_2026_archive || "$EDITION" =~ ^cac_filing_2026_(feb|apr|jun|aug)$ ]]; then
+          if [[ "$EDITION" == tc260_005 || "$EDITION" == miit_ai_applications_2025 || "$EDITION" == shanghai_manufacturing_2026 || "$EDITION" == ndrc_plan_2026_archive || "$EDITION" == xjtu_cross_cultural_ai || "$EDITION" =~ ^cac_filing_2026_(feb|apr|jun|aug)$ ]]; then
             stage=(--output /data/output)
           fi
           timeout --signal=TERM 180s docker run --rm --network=none --read-only --cap-drop=ALL \
