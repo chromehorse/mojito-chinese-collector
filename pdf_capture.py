@@ -40,6 +40,7 @@ CASES = {
         "original_citation": "10.19484/j.cnki.1000-8934.2024.07.006",
         "institutional_copy": True,
         "pages": 8,
+        "pdf_sha256": "178545af2a7a7309c6dd00d01bd95f0b414882a028a343d9ddda9a177da1a3f5",
         "probe_only": True,
         "inspect_all_pages": True,
     },
@@ -1074,6 +1075,24 @@ def inspect_attachment(case, reader, path, output=None):
             == Counter(unicodedata.normalize("NFKC", compact(candidate)))
             for page, candidate in zip(reader.pages, other, strict=True)
         ]
+        independent = independent_table_words(path)
+        geometry = []
+        for page, words in zip(reader.pages, independent, strict=True):
+            _, _, _, ops, _ = annex_coordinates(page)
+            fragments = [(op["ty"], op["tx"], op["displaced_tx"], op["text"])
+                         for op in ops if op["text"].strip()]
+            geometry.append({
+                "layout_blocks": len(fragments), "independent_words": len(words),
+                "layout_inventory_matches": Counter(compact("".join(f[3] for f in fragments)))
+                == Counter(compact(page.extract_text() or "")),
+                "layout_x": Counter(round(x / 5) * 5 for _, x, _, _ in fragments).most_common(10),
+                "independent_x": Counter(round(x / 5) * 5 for _, x, _, _ in words).most_common(10),
+                "layout_y_bounds": [round(min((y for y, _, _, _ in fragments), default=0)),
+                                    round(max((y for y, _, _, _ in fragments), default=0))],
+                "independent_y_bounds": [round(min(y for y, _, _, _ in words)),
+                                         round(max(y for y, _, _, _ in words))],
+            })
+        staged["journal_geometry"] = geometry
     return {"status": "attachment_measured", "pages": len(reader.pages), "samples": measurements,
             "column_labels": dict(Counter(label for page in text for label in re.findall(r"专栏(\d+)", page))),
             "figure_labels": dict(Counter(label for page in text for label in re.findall(r"图(\d+)", page))),
