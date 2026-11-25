@@ -17,6 +17,22 @@ from urllib.parse import urljoin, urlsplit
 
 
 CASES = {
+    "rdfybk_embodied_ai": {
+        "pdf": "https://www.rdfybk.com/qw/DownPdf?id=919636",
+        "record_title": "具身智能的崛起与知行关系的当代重构",
+        "author": "肖峰",
+        "original_citation": "《科学技术哲学研究》（太原）,2026.1.1～8",
+        "probe_only": True,
+        "inspect_all_pages": True,
+    },
+    "rdfybk_driving_responsibility": {
+        "pdf": "https://www.rdfybk.com/qw/DownPdf?id=912097",
+        "record_title": "自动驾驶时代的责任归属：功能性责任框架研究",
+        "author": "任昱霖",
+        "original_citation": "《自然辩证法研究》（京）,2025.9.77～83,106",
+        "probe_only": True,
+        "inspect_all_pages": True,
+    },
     "ndrc_plan_2026": {
         "parent": "https://www.ndrc.gov.cn/fggz/fzzlgh/gjfzgh/",
         "pdf": "https://www.ndrc.gov.cn/fggz/fzzlgh/gjfzgh/202603/U020260317369114704096.pdf",
@@ -205,7 +221,21 @@ def fetch(case, quarantine):
     from scraper.config import MAX_PDF_BYTES
     from scraper.fetcher import Fetcher
 
-    parent, url = case["parent"], case.get("pdf")
+    url = case["pdf"]
+    if "original_citation" in case:
+        host = "www.rdfybk.com"
+        parts = urlsplit(url)
+        if (parts.scheme != "https" or parts.netloc != host or parts.path != "/qw/DownPdf"
+                or parts.fragment or not re.fullmatch(r"id=[0-9]{6}", parts.query)):
+            raise CaptureError("unexpected_public_reprint_url")
+        fetcher = Fetcher(cache_dir=Path("/tmp/pdf-parent"), transport=httpx.HTTPTransport(trust_env=False),
+                          strict_html_hosts={host: {}})
+        try:
+            return download_pdf(fetcher, url, quarantine, min(MAX_PDF_BYTES, 5 * 1024 * 1024))
+        finally:
+            fetcher.close()
+
+    parent = case["parent"]
     parent_request = edition_snapshot({"url": parent, "archive_timestamp": case.get("parent_archive_timestamp")}) or parent
     attachment_request = edition_snapshot({"url": url, "archive_timestamp": case.get("archive_timestamp")}) or url
     archived = parent_request != parent or attachment_request != url
@@ -232,7 +262,7 @@ def fetch(case, quarantine):
         else:
             title = first_text(tree, case.get("title_selector", "#con_title, h1")) or ""
         if roster_month is not None:
-            from route_probe import CAC_ROSTER_INDEX, MEDIA_TYPE, cac_roster_links
+            from route_probe import CAC_ROSTER_INDEX, cac_roster_links
 
             url = cac_roster_links(page.text).get(roster_month)
             if parent != CAC_ROSTER_INDEX or title != case["title"] or url != case["pdf"]:
@@ -259,46 +289,48 @@ def fetch(case, quarantine):
                 raise CaptureError("publisher_prose_boundary_not_verified")
             (quarantine / "parent-paragraphs.json").write_text(
                 json.dumps(paragraphs[:case["prose_count"]], ensure_ascii=False), encoding="utf-8")
-        if not fetcher._robots_allows(attachment_request):
-            raise CaptureError("attachment_crawl_policy")
-        fetcher._polite_wait(attachment_request)
-        dest = quarantine / "attachment.pdf"
-        accept = "*/*" if roster_month else "application/pdf"
-        with fetcher._client.stream("GET", attachment_request, follow_redirects=False,
-                                    headers={"Accept": accept, "Accept-Encoding": "identity"}) as response:
-            mime = response.headers.get("content-type", "").partition(";")[0].strip().casefold()
-            disposition = response.headers.get("content-disposition", "").partition(";")[0].strip().casefold()
-            allowed_mime = {"application/pdf", "application/octet-stream"} if roster_month else {"application/pdf"}
-            # All four registered CAC roster URLs sent malformed media types with an
-            # attachment disposition and PDF magic. Accept that publisher behavior here,
-            # retaining the signature check before writing and the offline PDF parser.
-            cac_attachment = bool(roster_month and mime and not MEDIA_TYPE.fullmatch(mime)
-                                  and disposition == "attachment")
-            if response.status_code != 200 or (mime not in allowed_mime and not cac_attachment):
-                if roster_month:
-                    reported = {
-                        *allowed_mime, "application/download", "application/force-download", "application/x-download",
-                        "application/x-msdownload", "application/x-pdf", "text/html", "text/plain",
-                    }
-                    kind = mime if mime in reported else "other" if mime else "missing"
-                    raise CaptureError(f"roster_response_{response.status_code}_{kind}")
-                raise CaptureError("unexpected_attachment_response")
-            size = 0
-            with dest.open("xb") as output:
-                for chunk in response.iter_bytes(chunk_size=64 * 1024):
-                    if size == 0 and not chunk.startswith(b"%PDF-"):
-                        raise CaptureError("invalid_pdf_header")
-                    size += len(chunk)
-                    if size > MAX_PDF_BYTES:
-                        raise CaptureError("attachment_size_cap")
-                    output.write(chunk)
-            if not size:
-                raise CaptureError("empty_pdf")
-        return {"status": "downloaded", "bytes": size,
-                **({"response_type": "cac_malformed_attachment" if cac_attachment else mime} if roster_month else {})}
+        return download_pdf(fetcher, attachment_request, quarantine, MAX_PDF_BYTES, roster=bool(roster_month))
     finally:
         fetcher.close()
 
+
+def download_pdf(fetcher, url, quarantine, maximum_bytes, *, roster=False):
+    if not fetcher._robots_allows(url):
+        raise CaptureError("attachment_crawl_policy")
+    fetcher._polite_wait(url)
+    accept = "*/*" if roster else "application/pdf"
+    with fetcher._client.stream("GET", url, follow_redirects=False,
+                                headers={"Accept": accept, "Accept-Encoding": "identity"}) as response:
+        mime = response.headers.get("content-type", "").partition(";")[0].strip().casefold()
+        disposition = response.headers.get("content-disposition", "").partition(";")[0].strip().casefold()
+        allowed_mime = {"application/pdf", "application/octet-stream"} if roster else {"application/pdf"}
+        cac_attachment = False
+        if roster:
+            from route_probe import MEDIA_TYPE
+
+            # The registered CAC roster responses use malformed media types and attachment disposition.
+            cac_attachment = bool(mime and not MEDIA_TYPE.fullmatch(mime) and disposition == "attachment")
+        if response.status_code != 200 or (mime not in allowed_mime and not cac_attachment):
+            reported = {
+                *allowed_mime, "application/download", "application/force-download", "application/x-download",
+                "application/x-msdownload", "application/x-pdf", "text/html", "text/plain",
+            }
+            kind = mime if mime in reported else "other" if mime else "missing"
+            route = "roster" if roster else "attachment"
+            raise CaptureError(f"{route}_response_{response.status_code}_{kind}")
+        size = 0
+        with (quarantine / "attachment.pdf").open("xb") as output:
+            for chunk in response.iter_bytes(chunk_size=64 * 1024):
+                if size == 0 and not chunk.startswith(b"%PDF-"):
+                    raise CaptureError("invalid_pdf_header")
+                size += len(chunk)
+                if size > maximum_bytes:
+                    raise CaptureError("attachment_size_cap")
+                output.write(chunk)
+        if not size:
+            raise CaptureError("empty_pdf")
+    return {"status": "downloaded", "bytes": size,
+            **({"response_type": "cac_malformed_attachment" if cac_attachment else mime} if roster else {})}
 
 def compact(text):
     return re.sub(r"\s+", "", text)
@@ -1013,6 +1045,11 @@ def inspect_attachment(case, reader, path, output=None):
             spans.extend([(number, number)] * len(lines))
         meta = write_capture(case, path, output, paragraphs, spans, body_complete=False)
         staged = {"staged": 1, "body_complete": False, "paragraphs": len(paragraphs), "content_hash": meta["content_hash"]}
+    if citation := case.get("original_citation"):
+        first_page = unicodedata.normalize("NFKC", compact(other[0]))
+        staged["original_title_match"] = case["record_title"] in first_page
+        staged["original_author_match"] = case["author"] in first_page
+        staged["original_citation_match"] = unicodedata.normalize("NFKC", citation) in first_page
     return {"status": "attachment_measured", "pages": len(reader.pages), "samples": measurements,
             "column_labels": dict(Counter(label for page in text for label in re.findall(r"专栏(\d+)", page))),
             "figure_labels": dict(Counter(label for page in text for label in re.findall(r"图(\d+)", page))),
