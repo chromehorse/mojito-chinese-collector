@@ -6,7 +6,7 @@ on:
       edition:
         description: Exact publisher attachment for the collector test
         type: choice
-        options: [tc260_005, miit_ethics_control, shanghai_manufacturing_2026, cac_filing_2026_feb, cac_filing_2026_apr, cac_filing_2026_jun, cac_filing_2026_aug, ndrc_plan_2026, ndrc_plan_2026_archive]
+        options: [tc260_005, miit_ethics_control, miit_ai_applications_2025, shanghai_manufacturing_2026, cac_filing_2026_feb, cac_filing_2026_apr, cac_filing_2026_jun, cac_filing_2026_aug, ndrc_plan_2026, ndrc_plan_2026_archive]
         default: tc260_005
       publish_private:
         description: Transfer a verified supported edition to the private intake repository

@@ -145,6 +145,15 @@ CASES = {
         "anchors": {1: "第一条", 12: "本清单将根据工作需要动态调整"},
         "cross_page": {3: "主管部门监督。", 5: "系统的鲁棒性", 7: "人工智能科技活动清单"},
     },
+    "miit_ai_applications_2025": {
+        "parent": "https://www.miit.gov.cn/jgsj/kjs/wjfb/art/2026/art_735cc3b48391470ea3baec587e526d5f.html",
+        "pdf": "https://www.miit.gov.cn/cms_files/filemanager/1226211233/attach/20267/9d62254ba76243e8b795af58c4c18e6a.pdf",
+        "title": "工业和信息化部办公厅关于印发2025年人工智能应用典型案例名单的通知",
+        "pages": 16,
+        "probe_only": True,
+        "inspect_all_pages": True,
+        "inspect_grid": True,
+    },
     "shanghai_manufacturing_2026": {
         "parent": "https://www.sheitc.sh.gov.cn/cyfz/20260112/11e3168ff89a4eeea2b1afd193c19418.html",
         "pdf": "https://www.sheitc.sh.gov.cn/cmsres/bd/bd2a507f86fd48eea75d71c94d247c84/3d967ffb9266571689033d2857f6a0ee.pdf",
@@ -822,6 +831,11 @@ def inspect_attachment(case, reader, path, output=None):
                        "same_character_order": compact(plain) == compact(layout),
                        "chinese_characters": len(re.findall(r"[\u3400-\u9fff]", plain)),
                        "replacement_characters": plain.count("\ufffd") + layout.count("\ufffd")}
+        if case.get("inspect_grid"):
+            xs, ys, lines, _, diagnostics = annex_coordinates(page)
+            spans = Counter(axis for axis, *_ in lines)
+            measurement["grid"] = {"vertical_boundaries": len(xs), "horizontal_boundaries": len(ys),
+                                   "segments_by_axis": dict(spans), "text_blocks": diagnostics["block_count"]}
         if other is not None:
             comparison = compact(other[number])
             missing = Counter(compact(plain)) - Counter(comparison)
