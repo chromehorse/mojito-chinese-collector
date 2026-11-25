@@ -47,6 +47,8 @@ CASES = {
         "institutional_copy": True,
         "pages": 8,
         "pdf_sha256": "178545af2a7a7309c6dd00d01bd95f0b414882a028a343d9ddda9a177da1a3f5",
+        "content_hash": "a74ebe0658c438eeb8fd9a505e5dffdf9d23886d",
+        "paragraphs_by_page": (8, 10, 10, 10, 9, 12, 67, 56),
         "column_vertical_bounds": ((350, 690), (70, 767), (70, 767), (70, 767),
                                    (70, 767), (70, 767), (70, 767), (70, 460)),
         "inspect_all_pages": True,
@@ -1031,6 +1033,9 @@ def read_institutional_journal(case, reader, path, output):
                "paragraphs_by_page": dict(Counter(start for start, _ in spans))}
     if output is not None:
         meta = write_capture(case, path, output, paragraphs, spans)
+        if (meta["content_hash"] != case["content_hash"]
+                or tuple(summary["paragraphs_by_page"].values()) != case["paragraphs_by_page"]):
+            raise CaptureError("journal_normalized_edition_changed")
         summary.update(staged=1, content_hash=meta["content_hash"])
     return summary
 
