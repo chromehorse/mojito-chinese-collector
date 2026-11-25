@@ -153,6 +153,7 @@ CASES = {
         "pdf_sha256": "aee55ce5ab838efb80df48ab1c0c1906b309831d99735eff732865337caaf4eb",
         "table_boundaries": (17, 17, 19, 20, 20, 22, 23, 21, 21, 19, 19, 18, 21, 22, 23, 6),
         "expected_case_rows": 285,
+        "split_applicant": (7, "南京南智先进光电集成技术研究院", "有限公司"),
         "verify_case_grid": True,
         "probe_only": True,
         "inspect_all_pages": True,
@@ -874,6 +875,9 @@ def read_application_cases(case, reader, path):
     if len(pages) != case["pages"] or len(reader.pages) != case["pages"]:
         raise CaptureError("applications_page_count")
     counts = []
+    cases = []
+    split_page, applicant_start, applicant_end = case["split_applicant"]
+    joined_case = False
     headers = ("案例名称", "申报单位", "推荐单位")
     for number, (page, other, expected) in enumerate(zip(reader.pages, pages, case["table_boundaries"], strict=True), 1):
         xs, ys, lines, operations, _ = annex_coordinates(page)
@@ -898,8 +902,17 @@ def read_application_cases(case, reader, path):
                 empty_rows += 1
             elif len(texts) == 1 or texts == headers:
                 heading_rows += 1
+            elif number == split_page and index == 1:
+                prior_page, prior_index, prior_text = cases[-1]
+                if (texts != ("", applicant_end, "") or prior_page != number - 1
+                        or prior_index != case["table_boundaries"][number - 2] - 1
+                        or compact(prior_text[1]) != applicant_start):
+                    raise CaptureError("applications_split_applicant_not_verified")
+                prior_text[1] = join_line(prior_text[1], row[1])
+                joined_case = True
             elif all(texts) and all(" | " not in cell for cell in row):
                 data_rows += 1
+                cases.append((number, index, row))
             else:
                 raise CaptureError(f"applications_incomplete_row_{number}_{index}")
         if number == 1 and (compact("2025年人工智能应用典型案例名单") not in compact(before)
@@ -907,10 +920,10 @@ def read_application_cases(case, reader, path):
             raise CaptureError("applications_title_and_header")
         counts.append({"page": number, "rows": data_rows, "heading_rows": heading_rows, "empty_rows": empty_rows})
     total = sum(row["rows"] for row in counts)
-    if total != case["expected_case_rows"]:
+    if total != case["expected_case_rows"] or not joined_case:
         raise CaptureError(f"applications_case_count_{total}")
     return {"status": "applications_grid_verified", "pages": len(counts), "case_rows": total, "page_counts": counts,
-            "attachment_sha256": case["pdf_sha256"]}
+            "joined_row_pages": [split_page - 1, split_page], "attachment_sha256": case["pdf_sha256"]}
 
 
 def inspect_attachment(case, reader, path, output=None):
