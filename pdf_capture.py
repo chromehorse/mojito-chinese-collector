@@ -33,6 +33,16 @@ CASES = {
         "probe_only": True,
         "inspect_all_pages": True,
     },
+    "xjtu_cross_cultural_ai": {
+        "pdf": "https://marx.xjtu.edu.cn/__local/2/85/4A/20695F5E85046842C4A8A8939C7_AD4057CB_12A95D.pdf",
+        "record_title": "跨文化人工智能体的伦理设计何以可能?",
+        "author": "王亮",
+        "original_citation": "10.19484/j.cnki.1000-8934.2024.07.006",
+        "institutional_copy": True,
+        "pages": 8,
+        "probe_only": True,
+        "inspect_all_pages": True,
+    },
     "ndrc_plan_2026": {
         "parent": "https://www.ndrc.gov.cn/fggz/fzzlgh/gjfzgh/",
         "pdf": "https://www.ndrc.gov.cn/fggz/fzzlgh/gjfzgh/202603/U020260317369114704096.pdf",
@@ -223,15 +233,17 @@ def fetch(case, quarantine):
 
     url = case["pdf"]
     if "original_citation" in case:
-        host = "www.rdfybk.com"
         parts = urlsplit(url)
-        if (parts.scheme != "https" or parts.netloc != host or parts.path != "/qw/DownPdf"
-                or parts.fragment or not re.fullmatch(r"id=[0-9]{6}", parts.query)):
+        university = case.get("institutional_copy", False)
+        host = "marx.xjtu.edu.cn" if university else "www.rdfybk.com"
+        valid_path = (parts.path.startswith("/__local/") and parts.path.endswith(".pdf") and not parts.query
+                      if university else parts.path == "/qw/DownPdf" and re.fullmatch(r"id=[0-9]{6}", parts.query))
+        if parts.scheme != "https" or parts.netloc != host or parts.fragment or not valid_path:
             raise CaptureError("unexpected_public_reprint_url")
         fetcher = Fetcher(cache_dir=Path("/tmp/pdf-parent"), transport=httpx.HTTPTransport(trust_env=False),
                           strict_html_hosts={host: {}})
         try:
-            return download_pdf(fetcher, url, quarantine, min(MAX_PDF_BYTES, 5 * 1024 * 1024), reprint=True)
+            return download_pdf(fetcher, url, quarantine, min(MAX_PDF_BYTES, 5 * 1024 * 1024), reprint=not university)
         finally:
             fetcher.close()
 
