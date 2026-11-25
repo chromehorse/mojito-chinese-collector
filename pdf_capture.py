@@ -1068,6 +1068,12 @@ def inspect_attachment(case, reader, path, output=None):
         staged["original_title_match"] = case["record_title"] in first_page
         staged["original_author_match"] = case["author"] in first_page
         staged["original_citation_match"] = unicodedata.normalize("NFKC", citation) in first_page
+    if case.get("institutional_copy"):
+        staged["normalized_inventory_by_page"] = [
+            Counter(unicodedata.normalize("NFKC", compact(page.extract_text() or "")))
+            == Counter(unicodedata.normalize("NFKC", compact(candidate)))
+            for page, candidate in zip(reader.pages, other, strict=True)
+        ]
     return {"status": "attachment_measured", "pages": len(reader.pages), "samples": measurements,
             "column_labels": dict(Counter(label for page in text for label in re.findall(r"专栏(\d+)", page))),
             "figure_labels": dict(Counter(label for page in text for label in re.findall(r"图(\d+)", page))),
@@ -1081,7 +1087,9 @@ def extract(case, quarantine, output=None):
     if case.get("pdf_sha256") and sha256(path.read_bytes()).hexdigest() != case["pdf_sha256"]:
         raise CaptureError("roster_pdf_changed" if "roster_month" in case else "pdf_changed")
     with path.open("rb") as stream:
-        reader = PdfReader(stream, strict=True)
+        # The one XJTU copy fails strict object parsing. Measure the recovery
+        # against independent Poppler with private transfer disabled.
+        reader = PdfReader(stream, strict=not case.get("institutional_copy", False))
         if reader.is_encrypted:
             raise CaptureError("encrypted_pdf")
         if case.get("verify_case_grid"):
