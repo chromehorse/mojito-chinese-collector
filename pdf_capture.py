@@ -231,7 +231,7 @@ def fetch(case, quarantine):
         fetcher = Fetcher(cache_dir=Path("/tmp/pdf-parent"), transport=httpx.HTTPTransport(trust_env=False),
                           strict_html_hosts={host: {}})
         try:
-            return download_pdf(fetcher, url, quarantine, min(MAX_PDF_BYTES, 5 * 1024 * 1024))
+            return download_pdf(fetcher, url, quarantine, min(MAX_PDF_BYTES, 5 * 1024 * 1024), reprint=True)
         finally:
             fetcher.close()
 
@@ -294,7 +294,7 @@ def fetch(case, quarantine):
         fetcher.close()
 
 
-def download_pdf(fetcher, url, quarantine, maximum_bytes, *, roster=False):
+def download_pdf(fetcher, url, quarantine, maximum_bytes, *, roster=False, reprint=False):
     if not fetcher._robots_allows(url):
         raise CaptureError("attachment_crawl_policy")
     fetcher._polite_wait(url)
@@ -310,7 +310,10 @@ def download_pdf(fetcher, url, quarantine, maximum_bytes, *, roster=False):
 
             # The registered CAC roster responses use malformed media types and attachment disposition.
             cac_attachment = bool(mime and not MEDIA_TYPE.fullmatch(mime) and disposition == "attachment")
-        if response.status_code != 200 or (mime not in allowed_mime and not cac_attachment):
+        # The two exact reprint endpoints omit Content-Type. The PDF signature
+        # remains mandatory, and only the offline container opens the file.
+        unlabeled_reprint = reprint and not mime
+        if response.status_code != 200 or (mime not in allowed_mime and not cac_attachment and not unlabeled_reprint):
             reported = {
                 *allowed_mime, "application/download", "application/force-download", "application/x-download",
                 "application/x-msdownload", "application/x-pdf", "text/html", "text/plain",
@@ -329,8 +332,11 @@ def download_pdf(fetcher, url, quarantine, maximum_bytes, *, roster=False):
                 output.write(chunk)
         if not size:
             raise CaptureError("empty_pdf")
-    return {"status": "downloaded", "bytes": size,
-            **({"response_type": "cac_malformed_attachment" if cac_attachment else mime} if roster else {})}
+    result = {"status": "downloaded", "bytes": size}
+    if roster or reprint:
+        result["response_type"] = ("cac_malformed_attachment" if cac_attachment else
+                                   "pdf_signature_without_media_type" if unlabeled_reprint else mime)
+    return result
 
 def compact(text):
     return re.sub(r"\s+", "", text)
