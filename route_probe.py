@@ -53,6 +53,10 @@ CASES = {
         ("issue", "https://kxbz.cbpt.cnki.net/portal/journal/portal/client/paper_list/type_benqi", r"/paper/", ""),
         ("article", "https://kxbz.cbpt.cnki.net/portal/journal/portal/client/paper/0c12bb029efe6009bdb9ab76af071c4a", "", ""),
     ),
+    "journal_society_report": (
+        ("ai_ethics_forum", "https://www.chinasdn.org.cn/xwdt/gzdt/art/2026/art_9a196cab983040e1800d23f1178f97de.html",
+         "", "围绕人工智能伦理基础、治理机制、价值对齐"),
+    ),
     "moe": (
         ("policy_index", "https://www.moe.gov.cn/jyb_xxgk/xxgk/neirong/fenlei/sxml_jyxxh/jyxxh_xxh/xxh_xgzc/",
          r"/srcsite/.*?/t\d+_\d+\.html$", ""),
