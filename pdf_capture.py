@@ -150,6 +150,10 @@ CASES = {
         "pdf": "https://www.miit.gov.cn/cms_files/filemanager/1226211233/attach/20267/9d62254ba76243e8b795af58c4c18e6a.pdf",
         "title": "工业和信息化部办公厅关于印发2025年人工智能应用典型案例名单的通知",
         "pages": 16,
+        "pdf_sha256": "aee55ce5ab838efb80df48ab1c0c1906b309831d99735eff732865337caaf4eb",
+        "table_boundaries": (17, 17, 19, 20, 20, 22, 23, 21, 21, 19, 19, 18, 21, 22, 23, 6),
+        "expected_case_rows": 285,
+        "verify_case_grid": True,
         "probe_only": True,
         "inspect_all_pages": True,
         "inspect_grid": True,
@@ -432,6 +436,28 @@ _SHANGHAI_CELLS = (
 _SHANGHAI_HEADERS = ("专题", "方向名称", "支持内容", "联系人")
 
 
+def grid_edge(lines, axis, fixed, start, end):
+    low, high = sorted((start, end))
+    intervals = []
+    for kind, x1, y1, x2, y2 in lines:
+        if kind != axis:
+            continue
+        first, last, level = (x1, x2, y1) if axis == "h" else (y1, y2, x1)
+        a, b = sorted((first, last))
+        if abs(level - fixed) <= 0.2 and min(b, high) - max(a, low) > 0.5:
+            intervals.append((a, b))
+    if not intervals:
+        return False
+    position = low
+    for a, b in sorted(intervals):
+        if a > position + 0.5:
+            raise CaptureError("annex_partial_grid_edge")
+        position = max(position, b)
+    if position < high - 0.5:
+        raise CaptureError("annex_partial_grid_edge")
+    return True
+
+
 def verify_annex_grid(xs, ys, lines):
     if len(xs) != 6 or len(ys) != 6 or len(lines) != 12:
         raise CaptureError("annex_grid_size")
@@ -439,36 +465,15 @@ def verify_annex_grid(xs, ys, lines):
               for row, col, height, width in _SHANGHAI_CELLS
               for r in range(row, row + height) for c in range(col, col + width)}
 
-    def covered(axis, fixed, start, end):
-        low, high = sorted((start, end))
-        intervals = []
-        for kind, x1, y1, x2, y2 in lines:
-            if kind != axis:
-                continue
-            first, last, level = (x1, x2, y1) if axis == "h" else (y1, y2, x1)
-            a, b = sorted((first, last))
-            if abs(level - fixed) <= 0.2 and min(b, high) - max(a, low) > 0.5:
-                intervals.append((a, b))
-        if not intervals:
-            return False
-        position = low
-        for a, b in sorted(intervals):
-            if a > position + 0.5:
-                raise CaptureError("annex_partial_grid_edge")
-            position = max(position, b)
-        if position < high - 0.5:
-            raise CaptureError("annex_partial_grid_edge")
-        return True
-
     for row, y in enumerate(ys):
         for col, (left, right) in enumerate(zip(xs, xs[1:])):
             separates = owners.get((row - 1, col)) != owners.get((row, col))
-            if covered("h", y, left, right) != separates:
+            if grid_edge(lines, "h", y, left, right) != separates:
                 raise CaptureError("annex_horizontal_merge")
     for col, x in enumerate(xs):
         for row, (top, bottom) in enumerate(zip(ys, ys[1:])):
             separates = owners.get((row, col - 1)) != owners.get((row, col))
-            if covered("v", x, bottom, top) != separates:
+            if grid_edge(lines, "v", x, bottom, top) != separates:
                 raise CaptureError("annex_vertical_merge")
 
 
@@ -811,6 +816,103 @@ def boundary_folios(text):
             if lines and re.fullmatch(r"[0-9IVXLCDMⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+", lines[index])]
 
 
+def independent_table_words(path):
+    import subprocess
+    from tempfile import TemporaryFile
+    from xml.etree import ElementTree
+
+    with TemporaryFile() as stream:
+        subprocess.run(("pdftotext", "-enc", "UTF-8", "-bbox", str(path), "-"),
+                       stdout=stream, stderr=subprocess.PIPE, check=True, timeout=90)
+        stream.seek(0)
+        data = stream.read(3 * 1024 * 1024 + 1)
+    if len(data) > 3 * 1024 * 1024:
+        raise CaptureError("independent_table_size_cap")
+    pages = []
+    for page in ElementTree.fromstring(data).iterfind(".//{*}page"):
+        height = float(page.attrib["height"])
+        words = []
+        for word in page.iterfind("{*}word"):
+            left, right, top, bottom = (float(word.attrib[name]) for name in ("xMin", "xMax", "yMin", "yMax"))
+            words.append((height - (top + bottom) / 2, left, right, word.text or ""))
+        pages.append(words)
+    return pages
+
+
+def application_table_page(xs, ys, lines, fragments):
+    if not all(grid_edge(lines, "h", y, xs[0], xs[-1]) for y in ys):
+        raise CaptureError("applications_horizontal_grid")
+    cells = []
+    for top, bottom in zip(ys, ys[1:]):
+        left, first, second, right = [grid_edge(lines, "v", x, bottom, top) for x in xs]
+        if not left or not right or first != second:
+            raise CaptureError("applications_vertical_grid")
+        cells.append([[], [], []] if first else [[]])
+    before, after = [], []
+    row_edges = [-value for value in ys]
+    for y, x, end, word in fragments:
+        if not word.strip():
+            continue
+        if not all(map(isfinite, (x, y, end))) or x > end:
+            raise CaptureError("applications_text_position")
+        fragment = (y, x, end, word)
+        if y >= ys[0] or y <= ys[-1]:
+            (before if y >= ys[0] else after).append(fragment)
+            continue
+        row = cells[bisect_right(row_edges, -y) - 1]
+        column = bisect_right(xs, x) - 1
+        if not 0 <= column <= 2:
+            raise CaptureError("applications_cell_position")
+        row[column if len(row) == 3 else 0].append(fragment)
+    return (positioned_text(before, separate_lines=True),
+            [[positioned_text(cell) for cell in row] for row in cells],
+            positioned_text(after, separate_lines=True))
+
+
+def read_application_cases(case, reader, path):
+    pages = independent_table_words(path)
+    if len(pages) != case["pages"] or len(reader.pages) != case["pages"]:
+        raise CaptureError("applications_page_count")
+    counts = []
+    headers = ("案例名称", "申报单位", "推荐单位")
+    for number, (page, other, expected) in enumerate(zip(reader.pages, pages, case["table_boundaries"], strict=True), 1):
+        xs, ys, lines, operations, _ = annex_coordinates(page)
+        if page.rotation or len(xs) != 4 or len(ys) != expected:
+            raise CaptureError(f"applications_grid_shape_{number}")
+        fragments = [(float(op["ty"]), float(op["tx"]), float(op["displaced_tx"]), op["text"])
+                     for op in operations if op["text"].strip()]
+        before, rows, after = application_table_page(xs, ys, lines, fragments)
+        _, independent, _ = application_table_page(xs, ys, lines, other)
+        plain = compact(page.extract_text(extraction_mode="plain") or "")
+        inventory = Counter(plain)
+        reconstructed = compact(before + "".join(cell for row in rows for cell in row) + after)
+        if (not plain or "\ufffd" in plain or "\x00" in plain or inventory != Counter(reconstructed)
+                or inventory != Counter(compact("".join(word for _, _, _, word in other)))):
+            raise CaptureError(f"applications_character_inventory_{number}")
+        data_rows = heading_rows = empty_rows = 0
+        for index, (row, check) in enumerate(zip(rows, independent, strict=True), 1):
+            texts = tuple(map(compact, row))
+            if texts != tuple(map(compact, check)):
+                raise CaptureError(f"applications_cell_text_{number}_{index}")
+            if not any(texts):
+                empty_rows += 1
+            elif len(texts) == 1 or texts == headers:
+                heading_rows += 1
+            elif all(texts) and all(" | " not in cell for cell in row):
+                data_rows += 1
+            else:
+                raise CaptureError(f"applications_incomplete_row_{number}_{index}")
+        if number == 1 and (compact("2025年人工智能应用典型案例名单") not in compact(before)
+                            or tuple(map(compact, rows[0])) != headers):
+            raise CaptureError("applications_title_and_header")
+        counts.append({"page": number, "rows": data_rows, "heading_rows": heading_rows, "empty_rows": empty_rows})
+    total = sum(row["rows"] for row in counts)
+    if total != case["expected_case_rows"]:
+        raise CaptureError(f"applications_case_count_{total}")
+    return {"status": "applications_grid_verified", "pages": len(counts), "case_rows": total, "page_counts": counts,
+            "attachment_sha256": case["pdf_sha256"]}
+
+
 def inspect_attachment(case, reader, path, output=None):
     if not 1 <= len(reader.pages) <= 250 or case.get("pages", len(reader.pages)) != len(reader.pages):
         raise CaptureError("unexpected_page_count")
@@ -895,6 +997,8 @@ def extract(case, quarantine, output=None):
         if case.get("probe_only"):
             if output is not None and not case.get("inspection_capture"):
                 raise CaptureError("inspection_not_capture")
+            if case.get("verify_case_grid"):
+                return read_application_cases(case, reader, path)
             return inspect_attachment(case, reader, path, output)
         if "roster_month" in case:
             measurement, paragraphs, spans = read_roster(case, reader)
