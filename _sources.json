@@ -511,8 +511,8 @@
     },
     "country": "CN",
     "language": "zh",
-    "status": "requires-js",
-    "status_evidence": "2026-07-17: Rung-A reached content — shell meta-refreshes to WKB3/index.aspx then /portal/; portal exposes client endpoint /portal/journal/portal/client/paper_list/type_benqi (server-rendered, no JS to GET). Current issue = 10 div.paperBox blocks (title/author/abstract inline), but individual papers open via JS API getChineseHtmlUrl(paperId) with no static article <a href>. Abstract-only inline-block capture is a bounded v2 adapter; no paywall crossed."
+    "status": "blocked",
+    "status_evidence": "自然辩证法研究 — deferred: CNKI did not serve a verifiable crawl policy on 2026-11-19 or in nightly checks through 2026-11-22 ET. Use the policy-only GitHub diagnostic before restoring this route. The alternate national index is currently discovery only."
   },
   {
     "id": "kxjszx_yanjiu",
@@ -542,8 +542,8 @@
     },
     "country": "CN",
     "language": "zh",
-    "status": "requires-js",
-    "status_evidence": "2026-07-17: Rung-A reached content — shell meta-refreshes to WKB3/index.aspx then /portal/; portal exposes client endpoint /portal/journal/portal/client/paper_list/type_benqi (server-rendered, no JS to GET). Current issue = 10 div.paperBox blocks (title/author/abstract inline), but individual papers open via JS API getChineseHtmlUrl(paperId) with no static article <a href>. Abstract-only inline-block capture is a bounded v2 adapter; no paywall crossed."
+    "status": "blocked",
+    "status_evidence": "科学技术哲学研究 — deferred: CNKI did not serve a verifiable crawl policy on 2026-11-19 or in nightly checks through 2026-11-22 ET. Use the policy-only GitHub diagnostic before restoring this route. The alternate national index is currently discovery only."
   },
   {
     "id": "mee_state_council",
