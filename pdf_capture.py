@@ -898,6 +898,39 @@ def independent_table_words(path):
     return pages
 
 
+def journal_reading_order(path):
+    import subprocess
+    from tempfile import TemporaryFile
+    from xml.etree import ElementTree
+
+    layouts = []
+    for options in ((), ("-bbox-layout",)):
+        with TemporaryFile() as stream:
+            subprocess.run(("pdftotext", "-enc", "UTF-8", *options, str(path), "-"),
+                           stdout=stream, stderr=subprocess.PIPE, check=True, timeout=90)
+            stream.seek(0)
+            data = stream.read(3 * 1024 * 1024 + 1)
+        if len(data) > 3 * 1024 * 1024:
+            raise CaptureError("journal_reading_order_size")
+        layouts.append(data)
+    text_pages = layouts[0].decode("utf-8").split("\f")
+    if text_pages and not text_pages[-1].strip():
+        text_pages.pop()
+    xml_pages = []
+    page_shapes = []
+    for page in ElementTree.fromstring(layouts[1]).iterfind(".//{*}page"):
+        blocks = list(page.iterfind(".//{*}block"))
+        lines = [list(block.iterfind("{*}line")) for block in blocks]
+        xml_pages.append("\n".join(" ".join(word.text or "" for word in line.iterfind("{*}word"))
+                                   for block_lines in lines for line in block_lines))
+        page_shapes.append([
+            [round(float(block.attrib["xMin"])), round(float(block.attrib["xMax"])),
+             round(float(block.attrib["yMin"])), round(float(block.attrib["yMax"])), len(block_lines)]
+            for block, block_lines in zip(blocks, lines, strict=True)
+        ])
+    return text_pages, xml_pages, page_shapes
+
+
 def application_table_page(xs, ys, lines, fragments):
     if not all(grid_edge(lines, "h", y, xs[0], xs[-1]) for y in ys):
         raise CaptureError("applications_horizontal_grid")
@@ -1075,24 +1108,19 @@ def inspect_attachment(case, reader, path, output=None):
             == Counter(unicodedata.normalize("NFKC", compact(candidate)))
             for page, candidate in zip(reader.pages, other, strict=True)
         ]
-        independent = independent_table_words(path)
-        geometry = []
-        for page, words in zip(reader.pages, independent, strict=True):
-            _, _, _, ops, _ = annex_coordinates(page)
-            fragments = [(op["ty"], op["tx"], op["displaced_tx"], op["text"])
-                         for op in ops if op["text"].strip()]
-            geometry.append({
-                "layout_blocks": len(fragments), "independent_words": len(words),
-                "layout_inventory_matches": Counter(compact("".join(f[3] for f in fragments)))
-                == Counter(compact(page.extract_text() or "")),
-                "layout_x": Counter(round(x / 5) * 5 for _, x, _, _ in fragments).most_common(10),
-                "independent_x": Counter(round(x / 5) * 5 for _, x, _, _ in words).most_common(10),
-                "layout_y_bounds": [round(min((y for y, _, _, _ in fragments), default=0)),
-                                    round(max((y for y, _, _, _ in fragments), default=0))],
-                "independent_y_bounds": [round(min(y for y, _, _, _ in words)),
-                                         round(max(y for y, _, _, _ in words))],
-            })
-        staged["journal_geometry"] = geometry
+        ordered, positioned, shapes = journal_reading_order(path)
+        if len(ordered) != len(positioned) or len(ordered) != len(other):
+            raise CaptureError("journal_reading_order_pages")
+        staged["positioned_order_matches"] = [compact(a) == compact(b)
+                                              for a, b in zip(ordered, positioned, strict=True)]
+        staged["ordered_character_inventory_matches"] = [Counter(compact(a)) == Counter(compact(b))
+                                                         for a, b in zip(ordered, other, strict=True)]
+        staged["printed_reference_numbers"] = [
+            [int(number) for number in re.findall(r"(?m)^\s*\[\s*(\d{1,2})\s*\]",
+                                                 unicodedata.normalize("NFKC", page))]
+            for page in ordered
+        ]
+        staged["column_blocks"] = shapes
     return {"status": "attachment_measured", "pages": len(reader.pages), "samples": measurements,
             "column_labels": dict(Counter(label for page in text for label in re.findall(r"专栏(\d+)", page))),
             "figure_labels": dict(Counter(label for page in text for label in re.findall(r"图(\d+)", page))),
