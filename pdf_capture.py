@@ -712,7 +712,7 @@ def write_capture(case, path, output, paragraphs, spans, *, body_complete=True):
     from scraper.registry import load_registry
 
     entry = next(e for e in load_registry() if e["id"] == case["source"])
-    meta, text = build_record({"title": case.get("record_title", case["title"]), "date": case["date"],
+    meta, text = build_record({"title": case.get("record_title") or case["title"], "date": case["date"],
                                "body_paragraphs": paragraphs, "document_number": case["document_number"],
                                "issuing_institution": case["publisher"], "author": case.get("author")},
                               entry, case["pdf"], utcnow().isoformat(), body_complete=body_complete)
@@ -1219,8 +1219,7 @@ def extract(case, quarantine, output=None):
     if case.get("pdf_sha256") and sha256(path.read_bytes()).hexdigest() != case["pdf_sha256"]:
         raise CaptureError("roster_pdf_changed" if "roster_month" in case else "pdf_changed")
     with path.open("rb") as stream:
-        # The one XJTU copy fails strict object parsing. Measure the recovery
-        # against independent Poppler with private transfer disabled.
+        # The pinned XJTU copy needs object recovery and an independent Poppler check.
         reader = PdfReader(stream, strict=not case.get("institutional_copy", False))
         if reader.is_encrypted:
             raise CaptureError("encrypted_pdf")
